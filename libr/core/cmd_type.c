@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake, oddcoder, Anton Kochkov, Jody Frankowski */
+/* radare - LGPL - Copyright 2009-2017 - pancake, oddcoder, Anton Kochkov, Jody Frankowski */
 #include <string.h>
 
 #include "r_anal.h"
@@ -38,7 +38,7 @@ static void show_help(RCore *core) {
 static void showFormat(RCore *core, const char *name) {
 	const char *isenum = sdb_const_get (core->anal->sdb_types, name, 0);
 	if (isenum && !strcmp (isenum, "enum")) {
-		eprintf ("IS ENUM! \n");
+		eprintf ("IS ENUM\n");
 	} else {
 		char *fmt = r_anal_type_format (core->anal, name);
 		if (fmt) {
@@ -396,7 +396,7 @@ static int cmd_type(void *data, const char *input) {
 					char *out, *tmp;
 					tmp = r_core_editor (core, NULL, "");
 					if (tmp) {
-						out = r_parse_c_string (tmp);
+						out = r_parse_c_string (core->anal, tmp);
 						if (out) {
 							//		r_cons_strcat (out);
 							save_parsed_type (core, out);
@@ -405,7 +405,7 @@ static int cmd_type(void *data, const char *input) {
 						free (tmp);
 					}
 				} else {
-					char *out = r_parse_c_file (filename);
+					char *out = r_parse_c_file (core->anal, filename);
 					if (out) {
 						//r_cons_strcat (out);
 						save_parsed_type (core, out);
@@ -444,7 +444,7 @@ static int cmd_type(void *data, const char *input) {
 			snprintf (tmp, sizeof (tmp) - 1, "%s;", input + 2);
 			//const char *string = input + 2;
 			//r_anal_str_to_type (core->anal, string);
-			char *out = r_parse_c_string (tmp);
+			char *out = r_parse_c_string (core->anal, tmp);
 			if (out) {
 				//r_cons_strcat (out);
 				save_parsed_type (core, out);

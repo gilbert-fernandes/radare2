@@ -326,6 +326,7 @@ static int __cb_hit(RSearchKeyword *kw, void *user, ut64 addr) {
 		char *s = NULL, *str = NULL, *p = NULL;
 		extra = (json)? 3: 1;
 		const char *type = "hexpair";
+		bool escaped = false;
 		switch (kw->type) {
 		case R_SEARCH_KEYWORD_TYPE_STRING:
 		{
@@ -343,7 +344,12 @@ static int __cb_hit(RSearchKeyword *kw, void *user, ut64 addr) {
 			}
 			free (buf);
 			if (json) {
-				s = r_str_newf ("%s%s%s", pre, wrd, pos);
+				char *pre_esc = r_str_escape (pre);
+				char *pos_esc = r_str_escape (pos);
+				s = r_str_newf ("%s%s%s", pre_esc, wrd, pos_esc);
+				escaped = true;
+				free (pre_esc);
+				free (pos_esc);
 #if 0
 				char *msg = r_str_newf ("%s%s%s", pre, wrd, pos);
 				s = r_base64_encode_dyn (msg, -1);
@@ -394,8 +400,12 @@ static int __cb_hit(RSearchKeyword *kw, void *user, ut64 addr) {
 			if (!first_hit) {
 				r_cons_printf (",");
 			}
+			char *es = escaped ? s : r_str_escape (s);
 			r_cons_printf ("{\"offset\": %"PFMT64d ",\"id:\":%d,\"type\":\"%s\",\"data\":\"%s\"}",
-				base_addr + addr, kw->kwidx, type, s);
+				base_addr + addr, kw->kwidx, type, es);
+			if (!escaped) {
+				free (es);
+			}
 		} else {
 			r_cons_printf ("0x%08"PFMT64x " %s%d_%d %s\n",
 				base_addr + addr, searchprefix, kw->kwidx, kw->count, s);
@@ -655,9 +665,10 @@ R_API RList *r_core_get_boundaries_prot(RCore *core, int protection, const char 
 		if (core->io->debug) {
 			int mask = 0;
 			int add = 0;
-			int heap = false;
-			int stack = false;
-			int all = false;
+			bool heap = false;
+			bool stack = false;
+			bool all = false;
+			bool first = false;
 			RListIter *iter;
 			RDebugMap *map;
 
@@ -687,19 +698,18 @@ R_API RList *r_core_get_boundaries_prot(RCore *core, int protection, const char 
 					}
 				}
 			} else {
-				if (!strcmp (mode, "dbg.maps")) {
-					all = true;
-				}
-				if (!strcmp (mode, "dbg.maps.exec")) {
+				if (!strcmp (mode, "dbg.program")) {
+					first = true;
 					mask = R_IO_EXEC;
-				}
-				if (!strcmp (mode, "dbg.maps.write")) {
+				} else if (!strcmp (mode, "dbg.maps")) {
+					all = true;
+				} else if (!strcmp (mode, "dbg.maps.exec")) {
+					mask = R_IO_EXEC;
+				} else if (!strcmp (mode, "dbg.maps.write")) {
 					mask = R_IO_WRITE;
-				}
-				if (!strcmp (mode, "dbg.heap")) {
+				} else if (!strcmp (mode, "dbg.heap")) {
 					heap = true;
-				}
-				if (!strcmp (mode, "dbg.stack")) {
+				} else if (!strcmp (mode, "dbg.stack")) {
 					stack = true;
 				}
 
@@ -733,6 +743,9 @@ R_API RList *r_core_get_boundaries_prot(RCore *core, int protection, const char 
 						nmap->flags = map->perm;
 						nmap->delta = 0;
 						r_list_append (list, nmap);
+						if (first) {
+							break;
+						}
 					}
 				}
 			}
@@ -1608,15 +1621,19 @@ static void do_anal_search(RCore *core, struct search_parameters *param, const c
 		mode = *input;
 		input++;
 		break;
+	case 0:
+		r_cons_printf (
+			"Usage: /A[f][?jq] [op.type | op.family]\n"
+			" /A?      - list all opcode types\n"
+			" /Af?     - list all opcode families\n"
+			" /A ucall - find calls with unknown destination\n"
+			" /Af sse  - find SSE instructions\n");
+		return;
 	case '?':
-		r_cons_printf ("Usage: /A[jq]%s [type]\n", chk_family? "f": "");
 		for (i = 0; i < 64; i++) {
-			const char *str;
-			if (chk_family) {
-				str = r_anal_op_family_to_string (i);
-			} else {
-				str = r_anal_optype_to_string (i);
-			}
+			const char *str = chk_family
+				? r_anal_op_family_to_string (i)
+				: r_anal_optype_to_string (i);
 			if (chk_family && atoi (str)) {
 				break;
 			}
@@ -2374,6 +2391,9 @@ reread:
 		goto beach;
 	case 'r': // "/r" and "/re"
 		switch (input[1]) {
+		case 'a': // "/ra"
+			r_core_anal_search (core, param.from, param.to, UT64_MAX);
+			break;
 		case 'e': // "/re"
 			if (input[2] == '?') {
 				eprintf ("Usage: /re $$ - to find references to current address\n");
@@ -2406,6 +2426,9 @@ reread:
 			break;
 		case '?':
 			eprintf ("Usage /r[e] [address] - search references to this specific address\n");
+			eprintf (" /r [addr]  - search references to this specific address\n");
+			eprintf (" /re [addr] - search references using esil\n");
+			eprintf (" /ra        - search all references\n");
 			break;
 		}
 		break;

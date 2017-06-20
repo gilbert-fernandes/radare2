@@ -60,7 +60,20 @@ R_LIB_VERSION_HEADER(r_core);
 
 #define RTR_MAX_HOSTS 255
 
-#define R_CORE_CMD_DEPTH 10
+#define R_CORE_CMD_DEPTH 100
+
+/* visual mode */
+#define NPF 9
+#define PIDX (R_ABS (core->printidx % NPF))
+#define R_CORE_VISUAL_MODE_PX    0
+#define R_CORE_VISUAL_MODE_PD    1
+#define R_CORE_VISUAL_MODE_PDDBG 2
+#define R_CORE_VISUAL_MODE_PW    3
+#define R_CORE_VISUAL_MODE_PC    4
+#define R_CORE_VISUAL_MODE_PXA   5
+#define R_CORE_VISUAL_MODE_PSS   6
+#define R_CORE_VISUAL_MODE_PRC   7
+#define R_CORE_VISUAL_MODE_PXa   8
 
 typedef struct r_core_rtr_host_t {
 	int proto;
@@ -154,6 +167,7 @@ typedef struct r_core_t {
 	bool keep_asmqjmps;
 	// visual
 	int http_up;
+	int gdbserver_up;
 	int printidx;
 	int vseek;
 	bool in_search;
@@ -408,7 +422,7 @@ R_API int r_core_bin_set_env (RCore *r, RBinFile *binfile);
 R_API int r_core_bin_set_by_fd (RCore *core, ut64 bin_fd);
 R_API int r_core_bin_set_by_name (RCore *core, const char *name);
 R_API int r_core_bin_reload(RCore *core, const char *file, ut64 baseaddr);
-R_API int r_core_bin_load(RCore *core, const char *file, ut64 baseaddr);
+R_API bool r_core_bin_load(RCore *core, const char *file, ut64 baseaddr);
 R_API int r_core_bin_rebase(RCore *core, ut64 baddr);
 R_API void r_core_bin_export_info_rad(RCore *core);
 R_API int r_core_hash_load(RCore *core, const char *file);
@@ -507,6 +521,7 @@ R_API void r_core_rtr_session(RCore *core, const char *input);
 R_API void r_core_rtr_cmd(RCore *core, const char *input);
 R_API int r_core_rtr_http(RCore *core, int launch, const char *path);
 R_API int r_core_rtr_http_stop(RCore *u);
+R_API int r_core_rtr_gdb(RCore *core, int launch, const char *path);
 
 R_API void r_core_visual_config (RCore *core);
 R_API void r_core_visual_mounts (RCore *core);
@@ -517,6 +532,7 @@ R_API void r_core_visual_define (RCore *core, const char *arg);
 R_API int r_core_visual_trackflags (RCore *core);
 R_API int r_core_visual_comments (RCore *core);
 R_API int r_core_visual_prompt (RCore *core);
+R_API bool r_core_visual_esil (RCore *core);
 R_API int r_core_search_preludes(RCore *core);
 R_API int r_core_search_prelude(RCore *core, ut64 from, ut64 to, const ut8 *buf, int blen, const ut8 *mask, int mlen);
 R_API RList* /*<RIOMap*>*/ r_core_get_boundaries_prot (RCore *core, int protection, const char *mode, ut64 *from, ut64 *to);
@@ -566,7 +582,7 @@ typedef struct {
 	RCoreAnalStatsItem *block;
 } RCoreAnalStats;
 
-R_API bool core_anal_bbs(RCore *core, ut64 len);
+R_API bool core_anal_bbs(RCore *core, const char* input);
 R_API char *r_core_anal_hasrefs(RCore *core, ut64 value, bool verbose);
 R_API char *r_core_anal_get_comments(RCore *core, ut64 addr);
 R_API RCoreAnalStats* r_core_anal_get_stats (RCore *a, ut64 from, ut64 to, ut64 step);

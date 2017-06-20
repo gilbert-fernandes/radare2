@@ -2,6 +2,8 @@
 
 #include "r_core.h"
 #include "r_socket.h"
+#include "gdb/include/libgdbr.h"
+#include "gdb/include/gdbserver/core.h"
 
 #if 0
 SECURITY IMPLICATIONS
@@ -674,7 +676,6 @@ static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 							r_core_cmd0 (core, cmd + 1);
 							out = NULL;
 						} else {
-							// eprintf ("CMD (%s)\n", cmd);
 							out = r_core_cmd_str_pipe (core, cmd);
 						}
 						if (out) {
@@ -888,6 +889,266 @@ R_API int r_core_rtr_http(RCore *core, int launch, const char *path) {
 	return ret;
 }
 
+static int r_core_rtr_gdb_cb(libgdbr_t *g, void *core_ptr, const char *cmd, char *out_buf, size_t max_len) {
+	int ret;
+	RList *list;
+	RListIter *iter;
+	gdb_reg_t *gdb_reg;
+	utX val_big;
+	ut64 m_off, reg_val;
+	bool be;
+	RDebugPid *dbgpid;
+	if (!core_ptr || ! cmd) {
+		return -1;
+	}
+	RCore *core = (RCore*) core_ptr;
+	switch (cmd[0]) {
+	case 'd':
+		switch (cmd[1]) {
+		case 'm': // dm
+			if (snprintf (out_buf, max_len - 1, "%"PFMT64x, r_debug_get_baddr (core->dbg, NULL)) < 0) {
+				return -1;
+			}
+			return 0;
+		case 'p': // dp
+			switch (cmd[2]) {
+			case '\0': // dp
+				// TODO support multiprocess
+				snprintf (out_buf, max_len - 1, "QC%x", core->dbg->tid);
+				return 0;
+			case 't':
+				switch (cmd[3]) {
+				case '\0': // dpt
+					if (!core->dbg->h->threads) {
+						return -1;
+					}
+					if (!(list = core->dbg->h->threads(core->dbg, core->dbg->pid))) {
+						return -1;
+					}
+					memset (out_buf, 0, max_len);
+					out_buf[0] = 'm';
+					ret = 1;
+					r_list_foreach (list, iter, dbgpid) {
+						// Max length of a hex pid = 8?
+						if (ret >= max_len - 9) {
+							break;
+						}
+						snprintf (out_buf + ret, max_len - ret - 1, "%x,", dbgpid->pid);
+						ret = strlen (out_buf);
+					}
+					if (ret > 1) {
+						ret--;
+						out_buf[ret] = '\0';
+					}
+					return 0;
+				case 'r': // dptr -> return current tid as int
+					return core->dbg->tid;
+				default:
+					return r_core_cmd (core, cmd, 0);
+				}
+			}
+			break;
+		case 'r': // dr
+			be = r_config_get_i (core->config, "cfg.bigendian");
+			ret = 0;
+			if (!(gdb_reg = g->registers)) {
+				return -1;
+			}
+			while (*gdb_reg->name) {
+				if (ret + gdb_reg->size * 2 >= max_len - 1) {
+					return -1;
+				}
+				if (gdb_reg->size <= 8) {
+					reg_val = r_reg_getv (core->dbg->reg, gdb_reg->name);
+					if (!be) {
+						switch (gdb_reg->size) {
+						case 2:
+							reg_val = r_swap_ut16 (reg_val) & 0xFFFF;
+							break;
+						case 4:
+							reg_val = r_swap_ut32 (reg_val) & 0xFFFFFFFF;
+							break;
+						case 8:
+							reg_val = r_swap_ut64 (reg_val);
+							break;
+						default:
+							eprintf ("%s: Unsupported reg size: %d\n", __func__,
+								 (int) gdb_reg->size);
+						}
+					}
+					snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+						  gdb_reg->size == 2 ? "%04"PFMT64x
+						  : gdb_reg->size == 4 ? "%08"PFMT64x
+						  : "%016"PFMT64x, reg_val);
+				} else {
+					r_reg_get_value_big (core->dbg->reg,
+							     r_reg_get (core->dbg->reg, gdb_reg->name, -1),
+							     &val_big);
+					switch (gdb_reg->size) {
+					case 10:
+						if (be) {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%04x%016"PFMT64x, val_big.v80.High,
+								  val_big.v80.Low);
+						} else {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%016"PFMT64x"%04x", r_swap_ut64 (val_big.v80.Low),
+								  r_swap_ut16 (val_big.v80.High));
+						}
+						break;
+					case 12:
+						if (be) {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%08"PFMT32x"%016"PFMT64x, val_big.v96.High,
+								  val_big.v96.Low);
+						} else {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%016"PFMT64x"%08"PFMT32x, r_swap_ut64 (val_big.v96.Low),
+								  r_swap_ut32 (val_big.v96.High));
+						}
+						break;
+					case 16:
+						if (be) {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%016"PFMT64x"%016"PFMT64x, val_big.v128.High,
+								  val_big.v128.Low);
+						} else {
+							snprintf (out_buf + ret, gdb_reg->size * 2 + 1,
+								  "%016"PFMT64x"%016"PFMT64x, r_swap_ut64 (val_big.v128.Low),
+								  r_swap_ut64 (val_big.v128.High));
+						}
+						break;
+					default:
+						eprintf ("%s: big registers not yet supported\n", __func__);
+						break;
+					}
+				}
+				ret += gdb_reg->size * 2;
+				gdb_reg++;
+			}
+			out_buf[ret] = '\0';
+			return ret;
+		default:
+			return r_core_cmd (core, cmd, 0);
+		}
+		break;
+	case 'm':
+		sscanf (cmd + 1, "%"PFMT64x" %d", &m_off, &ret);
+		return r_io_read_at (core->io, m_off, (ut8*) out_buf, ret);
+	}
+	return -1;
+}
+
+// path = "<port> <file_name>"
+static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
+	RSocket *sock;
+	int p, ret;
+	char port[10];
+	char *file = NULL, *args = NULL;
+	libgdbr_t *g;
+	RCoreFile *cf;
+
+	if (!core || !path) {
+		return -1;
+	}
+	while (*path && isspace (*path)) {
+		path++;
+	}
+	if (!*path) {
+		eprintf ("gdbserver: Port not specified\n");
+		return -1;
+	}
+	if (path && (p = atoi (path))) {
+		if (p < 0 || p > 65535) {
+			eprintf ("gdbserver: Invalid port: %s\n", port);
+			return -1;
+		}
+		snprintf (port, sizeof (port) - 1, "%d", p);
+		if (!(file = strchr (path, ' '))) {
+			eprintf ("gdbserver: File not specified\n");
+			return -1;
+		}
+		while (isspace (*file)) {
+			file++;
+		}
+		if (!*file) {
+			eprintf ("gdbserver: File not specified\n");
+			return -1;
+		}
+	}
+	if (file) {
+		args = strchr (file, ' ');
+		if (args) {
+			*args++ = '\0';
+			while (isspace (*args)) {
+				args++;
+			}
+		} else {
+			args = "";
+		}
+	} else {
+		args = "";
+	}
+
+	if (!(cf = r_core_file_open (core, file, R_IO_READ, 0))) {
+		eprintf ("Cannot open file (%s)\n", file);
+		return -1;
+	}
+	r_core_file_reopen_debug (core, args);
+
+	if (!(sock = r_socket_new (false))) {
+		eprintf ("gdbserver: Could not open socket for listening\n");
+		return -1;
+	}
+	if (!r_socket_listen (sock, port, NULL)) {
+		r_socket_free (sock);
+		eprintf ("gdbserver: Cannot listen on port: %s\n", port);
+		return -1;
+	}
+	if (!(g = R_NEW0(libgdbr_t))) {
+		r_socket_free (sock);
+		eprintf ("gdbserver: Cannot alloc libgdbr instance\n");
+		return -1;
+	}
+	gdbr_init (g, true);
+	gdbr_set_architecture (g, r_config_get (core->config, "asm.arch"), r_config_get_i (core->config, "asm.bits"));
+	core->gdbserver_up = 1;
+	eprintf ("gdbserver started on port: %s, file: %s\n", port, file);
+
+	while (1) {
+		if (!(g->sock = r_socket_accept (sock))) {
+			break;
+		}
+		g->connected = 1;
+		ret = gdbr_server_serve (g, r_core_rtr_gdb_cb, (void*) core);
+		r_socket_close (g->sock);
+		g->connected = 0;
+		if (ret < 0) {
+			break;
+		}
+	}
+	core->gdbserver_up = 0;
+	gdbr_cleanup (g);
+	free (g);
+	r_socket_free (sock);
+	return 0;
+}
+
+R_API int r_core_rtr_gdb(RCore *core, int launch, const char *path) {
+	int ret;
+	if (r_sandbox_enable (0)) {
+		eprintf ("sandbox: connect disabled\n");
+		return -1;
+	}
+	// TODO: do stuff with launch
+	if (core->gdbserver_up) {
+		eprintf ("gdbserver is already running\n");
+		return -1;
+	}
+	ret = r_core_rtr_gdb_run (core, launch, path);
+	return ret;
+}
+
 R_API void r_core_rtr_help(RCore *core) {
 	const char* help_msg[] = {
 	"Usage:", " =[:!+-=hH] [...]", " # radare remote command execution protocol",
@@ -912,6 +1173,8 @@ R_API void r_core_rtr_help(RCore *core) {
 	"=h&", " port", "start http server in background)",
 	"=H", " port", "launch browser and listen for http",
 	"=H&", " port", "launch browser and listen for http in background",
+	"\ngdbserver:", "", "",
+	"=g", " port file", "listen on 'port' for debugging 'file' using gdbserver",
 	NULL };
 	r_core_cmd_help (core, help_msg);
 }
@@ -1388,8 +1651,9 @@ R_API char *r_core_rtr_cmds_query (RCore *core, const char *host, const char *po
 	ut8 buf[1024];
 
 	for (; retries > 0; r_sys_usleep (10 * 1000)) {
-		if (r_socket_connect (s, host, port, R_SOCKET_PROTO_TCP, timeout))
+		if (r_socket_connect (s, host, port, R_SOCKET_PROTO_TCP, timeout)) {
 			break;
+		}
 		retries--;
 	}
 	if (retries > 0) {

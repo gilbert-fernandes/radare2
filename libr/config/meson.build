@@ -4,13 +4,10 @@ files=[
 ]
 
 r_config = shared_library('r_config', files,
-  include_directories: include_directories([
-  '../include',
-  platform_librinc
-  ]),
+  include_directories: [platform_inc],
   link_with: [r_util],
   objects: [
-    r_sdb.extract_all_objects()
+    libr2sdb.extract_all_objects()
   ],
   install: true
 )

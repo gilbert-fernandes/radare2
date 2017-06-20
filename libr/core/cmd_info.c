@@ -253,8 +253,10 @@ static int cmd_info(void *data, const char *input) {
 	int is_array = 0;
 	Sdb *db;
 
-	for (i = 0; input[i] && i < 2; i++) {
-		switch (input[i]) {
+	for (i = 0; input[i] && input[i] != ' '; i++)
+		;
+	if (i > 0) {
+		switch (input[i - 1]) {
 		case '*': mode = R_CORE_BIN_RADARE; break;
 		case 'j': mode = R_CORE_BIN_JSON; break;
 		case 'q': mode = R_CORE_BIN_SIMPLE; break;
@@ -276,7 +278,6 @@ static int cmd_info(void *data, const char *input) {
 	if (!strcmp (input, "*")) {
 		input = "I*";
 	}
-	RBinObject *obj = r_bin_cur_object (core->bin);
 	while (*input) {
 		switch (*input) {
 		case 'b': // "ib"
@@ -393,7 +394,12 @@ static int cmd_info(void *data, const char *input) {
 				break;
 			}
 		case 'h': RBININFO ("fields", R_CORE_BIN_ACC_FIELDS, NULL, 0); break;
-		case 'l': RBININFO ("libs", R_CORE_BIN_ACC_LIBS, NULL, obj? r_list_length (obj->libs): 0); break;
+		case 'l': 
+			  {
+				  RBinObject *obj = r_bin_cur_object (core->bin);
+				  RBININFO ("libs", R_CORE_BIN_ACC_LIBS, NULL, obj? r_list_length (obj->libs): 0); 
+			  }
+			  break;
 		case 'L':
 		{
 			char *ptr = strchr (input, ' ');
@@ -442,7 +448,12 @@ static int cmd_info(void *data, const char *input) {
 			break;
 		case 'r': RBININFO ("relocs", R_CORE_BIN_ACC_RELOCS, NULL, 0); break;
 		case 'd': RBININFO ("dwarf", R_CORE_BIN_ACC_DWARF, NULL, -1); break;
-		case 'i': RBININFO ("imports",R_CORE_BIN_ACC_IMPORTS, NULL, obj? r_list_length (obj->imports): 0); break;
+		case 'i': {
+				  RBinObject *obj = r_bin_cur_object (core->bin);
+				  RBININFO ("imports", R_CORE_BIN_ACC_IMPORTS, NULL,
+						  obj? r_list_length (obj->imports): 0);
+			  }
+			  break;
 		case 'I': RBININFO ("info", R_CORE_BIN_ACC_INFO, NULL, 0); break;
 		case 'e': RBININFO ("entries", R_CORE_BIN_ACC_ENTRIES, NULL, 0); break;
 		case 'M': RBININFO ("main", R_CORE_BIN_ACC_MAIN, NULL, 0); break;
@@ -591,9 +602,9 @@ static int cmd_info(void *data, const char *input) {
 			return 0;
 		case 'a':
 			switch (mode) {
-			case R_CORE_BIN_RADARE: cmd_info (core, "i*IiecsSmz"); break;
-			case R_CORE_BIN_JSON: cmd_info (core, "ijIiecsSmz"); break;
-			case R_CORE_BIN_SIMPLE: cmd_info (core, "iqIiecsSmz"); break;
+			case R_CORE_BIN_RADARE: cmd_info (core, "iIiecsSmz*"); break;
+			case R_CORE_BIN_JSON: cmd_info (core, "iIiecsSmzj"); break;
+			case R_CORE_BIN_SIMPLE: cmd_info (core, "iIiecsSmzq"); break;
 			default: cmd_info (core, "IiEecsSmz"); break;
 			}
 			break;
@@ -625,7 +636,8 @@ static int cmd_info(void *data, const char *input) {
 				"im", "", "Show info about predefined memory allocation",
 				"iM", "", "Show main address",
 				"io", " [file]", "Load info from file (or last opened) use bin.baddr",
-				"ir|iR", "", "Relocs",
+				"ir", "", "Relocs",
+				"iR", "", "Resources",
 				"is", "", "Symbols",
 				"iS ", "[entropy,sha1]", "Sections (choose which hash algorithm to use)",
 				"iV", "", "Display file version info",

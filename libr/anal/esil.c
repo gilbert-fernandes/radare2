@@ -79,7 +79,7 @@ R_API RAnalEsil *r_anal_esil_new(int stacksize, int iotrap) {
 		free (esil);
 		return NULL;
 	}
-	if (!(esil->stack = malloc (sizeof(char *) * stacksize))) {
+	if (!(esil->stack = calloc (sizeof (char *), stacksize))) {
 		free (esil);
 		return NULL;
 	}
@@ -123,8 +123,9 @@ R_API int r_anal_esil_set_interrupt(RAnalEsil *esil, int interrupt, RAnalEsilInt
 }
 
 R_API int r_anal_esil_fire_trap(RAnalEsil *esil, int trap_type, int trap_code) {
-	if (!esil)
+	if (!esil) {
 		return false;
+	}
 	if (esil->cmd) {
 		if (esil->cmd (esil, esil->cmd_trap, trap_type, trap_code)) {
 			return true;
@@ -133,8 +134,9 @@ R_API int r_anal_esil_fire_trap(RAnalEsil *esil, int trap_type, int trap_code) {
 	if (esil->anal) {
 		RAnalPlugin *ap = esil->anal->cur;
 		if (ap && ap->esil_trap) {
-			if (ap->esil_trap (esil, trap_type, trap_code))
+			if (ap->esil_trap (esil, trap_type, trap_code)) {
 				return true;
+			}
 		}
 	}
 #if 0
@@ -152,10 +154,8 @@ R_API int r_anal_esil_fire_interrupt(RAnalEsil *esil, int interrupt) {
 	if (!esil) {
 		return false;
 	}
-	if (esil->cmd) {
-		if (esil->cmd (esil, esil->cmd_intr, interrupt, 0)) {
-			return true;
-		}
+	if (esil->cmd && esil->cmd (esil, esil->cmd_intr, interrupt, 0)) {
+		return true;
 	}
 	if (esil->anal) {
 		RAnalPlugin *ap = esil->anal->cur;
@@ -202,6 +202,11 @@ R_API void r_anal_esil_free(RAnalEsil *esil) {
 	if (esil->anal && esil->anal->cur && esil->anal->cur->esil_fini) {
 		esil->anal->cur->esil_fini (esil);
 	}
+	free (esil->cmd_intr);
+	free (esil->cmd_trap);
+	free (esil->cmd_mdev);
+	free (esil->cmd_todo);
+	free (esil->cmd_ioer);
 	free (esil);
 }
 
@@ -279,6 +284,9 @@ static int internal_esil_mem_write(RAnalEsil *esil, ut64 addr, const ut8 *buf, i
 		if (esil->iotrap) {
 			esil->trap = R_ANAL_TRAP_WRITE_ERR;
 			esil->trap_code = addr;
+		}
+		if (esil->cmd && esil->cmd_ioer && *esil->cmd_ioer) {
+			esil->cmd (esil, esil->cmd_ioer, esil->address, 0);
 		}
 	}
 	return ret;
@@ -560,8 +568,13 @@ static int esil_internal_write(RAnalEsil *esil, const char *str, ut64 num) {
 }
 
 R_API int r_anal_esil_get_parm_size(RAnalEsil *esil, const char *str, ut64 *num, int *size) {
+	if (!str || !*str) {
+		return false;
+	}
 	int parm_type = r_anal_esil_get_parm_type (esil, str);
-	if (!num || !esil) return false;
+	if (!num || !esil) {
+		return false;
+	}
 	switch (parm_type) {
 	case R_ANAL_ESIL_PARM_INTERNAL:
 		// *num = esil_internal_read (esil, str, num);
@@ -1298,6 +1311,21 @@ static int esil_goto(RAnalEsil *esil) {
 	if (src && *src && r_anal_esil_get_parm (esil, src, &num)) {
 		esil->parse_goto = num;
 	}
+	free (src);
+	return 1;
+}
+
+static int esil_repeat(RAnalEsil *esil) {
+	char *dst = r_anal_esil_pop (esil); // destaintion of the goto
+	char *src = r_anal_esil_pop (esil); // value of the counter
+	ut64 n, num = 0;
+	if (r_anal_esil_get_parm (esil, src, &n) && r_anal_esil_get_parm (esil, dst, &num)) {
+		if (n > 1) {
+			esil->parse_goto = num;
+			r_anal_esil_pushnum (esil, n - 1);
+		}
+	}
+	free (dst);
 	free (src);
 	return 1;
 }
@@ -2488,6 +2516,9 @@ static int iscommand(RAnalEsil *esil, const char *word, RAnalEsilOp *op) {
 
 static int runword(RAnalEsil *esil, const char *word) {
 	RAnalEsilOp op = NULL;
+	if (!word) {
+		return 0;
+	}
 	esil->parse_goto_count--;
 	if (esil->parse_goto_count < 1) {
 		ERR ("ESIL infinite loop detected\n");
@@ -2578,6 +2609,9 @@ static const char *gotoWord(const char *str, int n) {
  * 3: normal continuation
  */
 static int evalWord(RAnalEsil *esil, const char *ostr, const char **str) {
+	if (!esil || !str || !*str) {
+		return 0;
+	}
 	if ((*str)[0] && (*str)[1] == ',') {
 		return 2;
 	}
@@ -2614,6 +2648,11 @@ R_API int r_anal_esil_parse(RAnalEsil *esil, const char *str) {
 		return 0;
 	}
 	esil->trap = 0;
+	if (esil->cmd && esil->cmd_todo) {
+		if (!strncmp (str, "TODO", 4)) {
+			esil->cmd (esil, esil->cmd_todo, esil->address, 0);
+		}
+	}
 loop:
 	esil->repeat = 0;
 	esil->skip = 0;
@@ -2654,8 +2693,9 @@ repeat:
 					case 1: return 0;
 					case 2: continue;
 				}
-				if (dorunword == 1)
+				if (dorunword == 1) {
 					return 0;
+				}
 			}
 			str++;
 		}
@@ -2674,6 +2714,20 @@ repeat:
 		case 1: return 0;
 		case 2: goto repeat;
 		}
+	}
+	return 1;
+}
+
+R_API int r_anal_esil_runword(RAnalEsil *esil, const char *word) {
+	const char *str = NULL;
+	runword (esil, word);
+	if (*word) {
+		if (!runword (esil, word)) {
+			return 0;
+		}
+		int ew = evalWord (esil, word, &str);
+		eprintf ("ew %d\n", ew);
+		eprintf ("--> %s\n", r_str_get (str));
 	}
 	return 1;
 }
@@ -2820,6 +2874,7 @@ static void r_anal_esil_setup_ops(RAnalEsil *esil) {
 	OP ("[4]", esil_peek4);
 	OP ("[8]", esil_peek8);
 	OP ("STACK", r_anal_esil_dumpstack);
+	OP ("REPEAT", esil_repeat);
 	OP ("POP", esil_pop);
 	OP ("TODO", esil_todo);
 	OP ("GOTO", esil_goto);

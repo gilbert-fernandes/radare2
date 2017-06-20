@@ -74,6 +74,10 @@ radare2-regressions
 radare2-w32-*
 radare2-regressions
 tags
+**/GPATH
+**/GRTAGS
+**/GTAGS
+**/.gdb_history
 .lvimrc
 .nconfig.tmp
 .ycm_extra_conf.py
@@ -81,3 +85,8 @@ tags
 .kdev4/*
 *.kdev4
 radare2-*.zip
+# Ignore meson related files
+bin/
+meson.py
+ninja.exe
+.DS_Store

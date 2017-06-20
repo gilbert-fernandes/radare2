@@ -160,7 +160,7 @@ static int cmd_egg(void *data, const char *input) {
 		RListIter *iter;
 		REggPlugin *p;
 		r_list_foreach (egg->plugins, iter, p) {
-			printf ("%s  %6s : %s\n",
+			r_cons_printf ("%s  %6s : %s\n",
 				(p->type == R_EGG_PLUGIN_SHELLCODE)?
 				"shc": "enc", p->name, p->desc);
 		}
@@ -205,7 +205,7 @@ static int cmd_egg(void *data, const char *input) {
 			"gw", "", "Compile and write",
 			"gc", " cmd=/bin/ls", "Set config option for shellcodes and encoders",
 			"gc", "", "List all config options",
-			"gl", " [?]", "List plugins (shellcodes, encoders)",
+			"gl", "[?]", "List plugins (shellcodes, encoders)",
 			"gs", " name args", "Compile syscall name(args)",
 			"gi", " [type]", "Compile shellcode. like ragg2 -i (see gl or ragg2 -L)",
 			"gp", " padding", "Define padding for command",

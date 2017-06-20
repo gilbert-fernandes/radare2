@@ -11,7 +11,7 @@ R_LIB_VERSION(r_lib);
 
 #if __UNIX__
 #include <dlfcn.h>
-  #define DLOPEN(x)  dlopen(x, RTLD_GLOBAL | RTLD_NOW)
+  #define DLOPEN(x)  dlopen(x, RTLD_LOCAL | RTLD_NOW)
   #define DLSYM(x,y) dlsym(x,y)
   #define DLCLOSE(x) dlclose(x)
 #elif __WINDOWS__
@@ -80,7 +80,11 @@ R_API void *r_lib_dl_sym(void *handler, const char *name) {
 }
 
 R_API int r_lib_dl_close(void *handler) {
-	return DLCLOSE (handler);
+	int ret = -1;
+	if (handler) {
+		ret = DLCLOSE (handler);
+	}
+	return ret;
 }
 
 /* ---- */
@@ -266,6 +270,9 @@ R_API int r_lib_open_ptr (RLib *lib, const char *file, void *handler, RLibStruct
 	RListIter *iter;
 	int ret = false;
 
+	if (!lib || !file || !stru) {
+		return R_FAIL;
+	}
 	if (stru->version) {
 		if (strcmp (stru->version, R2_VERSION)) {
 			eprintf ("Module version mismatch %s (%s) vs (%s)\n",
@@ -274,14 +281,16 @@ R_API int r_lib_open_ptr (RLib *lib, const char *file, void *handler, RLibStruct
 		}
 	}
 	// TODO: Use Sdb here. just a single line
-	r_list_foreach (lib->plugins, iter, p) {
-		if (samefile (file, p->file)) {
-			IFDBG eprintf ("Dupped\n");
-			// TODO: reload if opening again?
-			// TODO: store timestamp of file
-			// TODO: autoreload plugins if updated \o/
-			r_lib_dl_close (handler);
-			return R_FAIL;
+	if (handler) {
+		r_list_foreach (lib->plugins, iter, p) {
+			if (samefile (file, p->file)) {
+				IFDBG eprintf ("Dupped\n");
+				// TODO: reload if opening again?
+				// TODO: store timestamp of file
+				// TODO: autoreload plugins if updated \o/
+				r_lib_dl_close (handler);
+				return R_FAIL;
+			}
 		}
 	}
 

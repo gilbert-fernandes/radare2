@@ -10,11 +10,8 @@ files=[
 ]
 
 r_magic = shared_library('r_magic', files,
-  include_directories: include_directories([
-  '../include'],
-  platform_librinc
-  ),
-  c_args: ['-DCORELIB','-DHAVE_CONFIG_H','-I.'],
+  include_directories: [platform_inc],
+  c_args: ['-DCORELIB'],
   link_with: [r_util],
   install: true
 )

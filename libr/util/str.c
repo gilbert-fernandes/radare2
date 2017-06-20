@@ -588,7 +588,7 @@ R_API char *r_str_ichr(char *str, char chr) {
 R_API const char *r_str_lchr(const char *str, char chr) {
 	if (str) {
 		int len = strlen (str);
-		for (;len >= 0; len--) {
+		for (; len >= 0; len--) {
 			if (str[len] == chr) {
 				return str + len;
 			}
@@ -859,7 +859,10 @@ R_API const char *r_str_get2(const char *str) {
 }
 
 R_API char *r_str_ndup(const char *ptr, int len) {
-	char *out = malloc (len+1);
+	if (len < 0) {
+		return NULL;
+	}
+	char *out = malloc (len + 1);
 	if (!out) {
 		return NULL;
 	}
@@ -1220,8 +1223,12 @@ static char *r_str_escape_(const char *buf, const int dot_nl, const bool ign_esc
 			*q++ = 'r';
 			break;
 		case '\\':
-			*q++ = '\\';
-			*q++ = '\\';
+			if (p[1] == 'u') {
+				*q++ = '\\';
+			} else {
+				*q++ = '\\';
+				*q++ = '\\';
+			}
 			break;
 		case '\t':
 			*q++ = '\\';
@@ -1803,11 +1810,38 @@ R_API void r_str_argv_free(char **argv) {
 	free (argv);
 }
 
+R_API const char *r_str_firstbut (const char *s, char ch, const char *but) {
+	int idx, _b = 0;
+	ut8 *b = (ut8*)&_b;
+	const char *isbut, *p;
+	const int bsz = sizeof (_b) * 8;
+	if (!but) {
+		return strchr (s, ch);
+	}
+	if (strlen (but) >= bsz) {
+		eprintf ("r_str_firstbut: but string too long\n");
+		return NULL;
+	}
+	for (p = s; *p; p++) {
+		isbut = strchr (but, *p);
+		if (isbut) {
+			idx = (int)(size_t)(isbut - but);
+			_b = R_BIT_SWAP(b, idx);
+			continue;
+		}
+		if (*p == ch && !_b) {
+			return p;
+		}
+	}
+	return NULL;
+}
+
+
 R_API const char *r_str_lastbut (const char *s, char ch, const char *but) {
 	int idx, _b = 0;
 	ut8 *b = (ut8*)&_b;
 	const char *isbut, *p, *lp = NULL;
-	const int bsz = sizeof (_b);
+	const int bsz = sizeof (_b) * 8;
 	if (!but) {
 		return r_str_lchr (s, ch);
 	}
@@ -1819,9 +1853,7 @@ R_API const char *r_str_lastbut (const char *s, char ch, const char *but) {
 		isbut = strchr (but, *p);
 		if (isbut) {
 			idx = (int)(size_t)(isbut - but);
-			_b = R_BIT_CHK (b, idx)?
-				R_BIT_UNSET (b, idx):
-				R_BIT_SET (b, idx);
+			_b = R_BIT_SWAP(b, idx);
 			continue;
 		}
 		if (*p == ch && !_b) {

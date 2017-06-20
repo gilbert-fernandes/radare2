@@ -266,13 +266,16 @@ static inline void *r_new_copy(int size, void *data) {
 
 #define R_PTR_ALIGN(v,t) \
 	((char *)(((size_t)(v) ) \
-	& ~(t - 1))) 
+	& ~(t - 1)))
 #define R_PTR_ALIGN_NEXT(v,t) \
 	((char *)(((size_t)(v) + (t - 1)) \
-	& ~(t - 1))) 
+	& ~(t - 1)))
 
 #define R_BIT_SET(x,y) (((ut8*)x)[y>>4] |= (1<<(y&0xf)))
 #define R_BIT_UNSET(x,y) (((ut8*)x)[y>>4] &= ~(1<<(y&0xf)))
+#define R_BIT_SWAP(x, y) ( R_BIT_CHK (x, y) ? \
+		R_BIT_UNSET (x, y): R_BIT_SET (x, y))
+
 //#define R_BIT_CHK(x,y) ((((const ut8*)x)[y>>4] & (1<<(y&0xf))))
 #define R_BIT_CHK(x,y) (*(x) & (1<<(y)))
 
@@ -389,27 +392,35 @@ static inline void *r_new_copy(int size, void *data) {
 #if __i386__
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __x86_64__
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
+#define R_SYS_ENDIAN 0
 #elif __POWERPC__
 #define R_SYS_ARCH "ppc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __arm__
 #define R_SYS_ARCH "arm"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __arm64__ || __aarch64__
 #define R_SYS_ARCH "arm"
 #define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
+#define R_SYS_ENDIAN 0
 #elif __arc__
 #define R_SYS_ARCH "arc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __sparc__
 #define R_SYS_ARCH "sparc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 1
 #elif __mips__
 #define R_SYS_ARCH "mips"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 1
 #elif __EMSCRIPTEN__
 /* we should default to wasm when ready */
 #define R_SYS_ARCH "x86"
@@ -419,15 +430,18 @@ static inline void *r_new_copy(int size, void *data) {
 #ifdef _WIN64
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
-#define __x86_64__
+#define R_SYS_ENDIAN 0
+#define __x86_64__ 1
 #else
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS (R_SYS_BITS_32)
 #define __i386__ 1
+#define R_SYS_ENDIAN 0
 #endif
 #else
 #define R_SYS_ARCH "unknown"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #endif
 #endif
 

@@ -58,15 +58,13 @@ if host_os == 'darwin'
 endif
 
 r_debug = shared_library('r_debug', files,
-  include_directories: include_directories([
-  '../include', 
-  '../bin/format/elf',
-  platform_librinc
-  ]),
-  c_args: ['-DCORELIB'],
-  link_with: [r_util, r_hash, r_reg, r_syscall, r_anal, r_flag, r_io, r_bp, r_search, r_cons, r_lang],
+  include_directories: [platform_inc, include_directories([
+    '../bin/format/elf',
+  ])],
+  c_args : ['-DCORELIB=1', '-I' + meson.current_build_dir() + '/../..'],
+  link_with: [r_util, r_hash, r_reg, r_syscall, r_anal, r_flag, r_io, r_bp, r_search, r_cons, r_lang, r_egg],
   objects: [
-    r_sdb.extract_all_objects(),
+    libr2sdb.extract_all_objects(),
   ],
   install: true
 )

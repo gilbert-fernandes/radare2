@@ -89,6 +89,9 @@ fail:
 static const char *has_esil(RCore *core, const char *name) {
 	RListIter *iter;
 	RAnalPlugin *h;
+	if (!core || !core->anal || !name) {
+		return NULL;
+	}
 	RAnal *a = core->anal;
 	r_list_foreach (a->plugins, iter, h) {
 		if (!strcmp (name, h->name)) {
@@ -176,6 +179,15 @@ static int cb_analafterjmp(void *user, void *data) {
 	RCore *core = (RCore*) user;
 	RConfigNode *node = (RConfigNode*) data;
 	core->anal->opt.afterjmp = node->i_value;
+	return true;
+}
+
+static int cb_analstrings(void *user, void *data) {
+	RCore *core = (RCore*) user;
+	RConfigNode *node = (RConfigNode*) data;
+	if (node->i_value) {
+		r_config_set (core->config, "bin.strings", "false");
+	}
 	return true;
 }
 
@@ -1109,12 +1121,35 @@ R_API bool r_core_esil_cmd(RAnalEsil *esil, const char *cmd, ut64 a1, ut64 a2) {
 	return false;
 }
 
+static int cb_cmd_esil_ioer(void *user, void *data) {
+	RCore *core = (RCore *) user;
+	RConfigNode *node = (RConfigNode *) data;
+	if (core && core->anal && core->anal->esil) {
+		core->anal->esil->cmd = r_core_esil_cmd;
+		free (core->anal->esil->cmd_ioer);
+		core->anal->esil->cmd_ioer = strdup (node->value);
+	}
+	return true;
+}
+
+static int cb_cmd_esil_todo(void *user, void *data) {
+	RCore *core = (RCore *) user;
+	RConfigNode *node = (RConfigNode *) data;
+	if (core && core->anal && core->anal->esil) {
+		core->anal->esil->cmd = r_core_esil_cmd;
+		free (core->anal->esil->cmd_todo);
+		core->anal->esil->cmd_todo = strdup (node->value);
+	}
+	return true;
+}
+
 static int cb_cmd_esil_intr(void *user, void *data) {
 	RCore *core = (RCore *) user;
 	RConfigNode *node = (RConfigNode *) data;
 	if (core && core->anal && core->anal->esil) {
 		core->anal->esil->cmd = r_core_esil_cmd;
-		core->anal->esil->cmd_intr = node->value;
+		free (core->anal->esil->cmd_intr);
+		core->anal->esil->cmd_intr = strdup (node->value);
 	}
 	return true;
 }
@@ -1123,7 +1158,9 @@ static int cb_mdevrange(void *user, void *data) {
 	RCore *core = (RCore *) user;
 	RConfigNode *node = (RConfigNode *) data;
 	if (core && core->anal && core->anal->esil) {
-		core->anal->esil->mdev_range = node->value;
+		core->anal->esil->cmd = r_core_esil_cmd;
+		free (core->anal->esil->mdev_range);
+		core->anal->esil->mdev_range = strdup (node->value);
 	}
 	return true;
 }
@@ -1133,7 +1170,8 @@ static int cb_cmd_esil_mdev(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
 	if (core && core->anal && core->anal->esil) {
 		core->anal->esil->cmd = r_core_esil_cmd;
-		core->anal->esil->cmd_mdev = node->value;
+		free (core->anal->esil->cmd_mdev);
+		core->anal->esil->cmd_mdev = strdup (node->value);
 	}
 	return true;
 }
@@ -1143,7 +1181,7 @@ static int cb_cmd_esil_trap(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
 	if (core && core->anal && core->anal->esil) {
 		core->anal->esil->cmd = r_core_esil_cmd;
-		core->anal->esil->cmd_trap = node->value;
+		core->anal->esil->cmd_trap = strdup (node->value);
 	}
 	return true;
 }
@@ -1177,7 +1215,10 @@ static int cb_cmddepth(void *user, void *data) {
 
 static int cb_hexcols(void *user, void *data) {
 	RCore *core = (RCore *)user;
-	int c = R_MIN (128, R_MAX (((RConfigNode*)data)->i_value, 0));
+	int c = R_MIN (1024, R_MAX (((RConfigNode*)data)->i_value, 0));
+	if (c < 0) {
+		c = 0;
+	}
 	core->print->cols = c & ~1;
 	core->dbg->regcols = c/4;
 	return true;
@@ -1263,10 +1304,12 @@ static int cb_iova(void *user, void *data) {
 		if (r_io_desc_get (core->io, core->io->raised)) {
 			r_core_block_read (core);
 		}
+#if 0
 		/* reload symbol information */
 		if (r_list_length (r_bin_get_sections (core->bin)) > 0) {
 			r_core_cmd0 (core, ".ia*");
 		}
+#endif
 	}
 	return true;
 }
@@ -1289,6 +1332,23 @@ static int cb_io_oxff(void *user, void *data) {
 	RCore *core = (RCore *) user;
 	RConfigNode *node = (RConfigNode *) data;
 	core->io->Oxff = node->i_value;
+	return true;
+}
+
+static int cb_filepath(void *user, void *data) {
+	RCore *core = (RCore *) user;
+	RConfigNode *node = (RConfigNode *) data;
+	r_config_set (core->config, "file.lastpath", node->value);
+	char *pikaboo = strstr (node->value, "://");
+	if (pikaboo) {
+		if (pikaboo[3] == '/') {
+			char *ovalue = node->value;
+			node->value = strdup (pikaboo + 3);
+			free (ovalue);
+			return true;
+		}
+		return false;
+	}
 	return true;
 }
 
@@ -1549,7 +1609,8 @@ static int cb_zoombyte(void *user, void *data) {
 			core->print->zoom->mode = *node->value;
 			break;
 		default:
-			eprintf ("Invalid zoom.byte value. See pz? for help\n");
+			r_cons_printf ("p\nf\ns\n0\nF\ne\nh\n");
+			// eprintf ("Invalid zoom.byte value. See pz? for help\n");
 			return false;
 	}
 	return true;
@@ -1871,7 +1932,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("anal.autoname", "true", "Automatically set a name for the functions, may result in some false positives");
 	SETPREF ("anal.hasnext", "false", "Continue analysis after each function");
 	SETPREF ("anal.esil", "false", "Use the new ESIL code analysis");
-	SETPREF ("anal.strings", "false", "Identify and register strings during analysis (aar only)");
+	SETCB ("anal.strings", "false", &cb_analstrings, "Identify and register strings during analysis (aar only)");
 	SETPREF ("anal.vars", "true",  "Analyze local variables and arguments");
 	SETPREF ("anal.vinfun", "true",  "Search values in functions (aav) (false by default to only find on non-code)");
 	SETPREF ("anal.vinfunrange", "false",  "Search values outside function ranges (requires anal.vinfun=false)\n");
@@ -1964,6 +2025,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("asm.lineswide", "false", "Put a space between lines");
 	SETICB ("asm.lineswidth", 7, &cb_asmlineswidth, "Number of columns for program flow arrows");
 	SETPREF ("asm.middle", "false", "Allow disassembling jumps in the middle of an instruction");
+	SETPREF ("asm.noisy", "true", "Show comments considered noisy but possibly useful");
 	SETPREF ("asm.offset", "true", "Show offsets at disassembly");
 	SETPREF ("asm.reloff", "false", "Show relative offsets instead of absolute address in disasm");
 	SETPREF ("asm.reloff.flags", "false", "Show relative offsets to flags (not only functions)");
@@ -2026,6 +2088,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("asm.marks", "true", "Show marks before the disassembly");
 	SETPREF ("asm.cmtrefs", "false", "Show flag and comments from refs in disasm");
 	SETPREF ("asm.cmtpatch", "false", "Show patch comments in disasm");
+	SETPREF ("asm.cmtoff", "nodup", "Show offset comment in disasm (true, false, nodup)");
 	SETPREF ("asm.payloads", "false", "Show payload bytes in disasm");
 	SETCB ("bin.strpurge", "false", &cb_strpurge, "Try to purge false positive strings");
 	SETPREF ("bin.libs", "false", "Try to load libraries after loading main binary");
@@ -2041,7 +2104,8 @@ R_API int r_core_config_init(RCore *core) {
 	/* bin */
 	SETI ("bin.baddr", -1, "Base address of the binary");
 	SETI ("bin.laddr", 0, "Base address for loading library ('*.so')");
-	SETPREF ("bin.dbginfo", "true", "Load debug information on startup if available");
+	SETPREF ("bin.dbginfo", "true", "Load debug information at startup if available");
+	SETPREF ("bin.relocs", "true", "Load relocs information at startup if available");
 	SETICB ("bin.minstr", 0, &cb_binminstr, "Minimum string length for r_bin");
 	SETICB ("bin.maxstr", 0, &cb_binmaxstr, "Maximum string length for r_bin");
 	SETICB ("bin.maxstrbuf", 1024*1024*10, & cb_binmaxstrbuf, "Maximum size of range to load strings from");
@@ -2158,6 +2222,7 @@ R_API int r_core_config_init(RCore *core) {
 	r_config_desc (cfg, "dbg.follow", "Follow program counter when pc > core->offset + dbg.follow");
 	SETCB ("dbg.swstep", "false", &cb_swstep, "Force use of software steps (code analysis+breakpoint)");
 	SETPREF ("dbg.trace.inrange", "false", "While tracing, avoid following calls outside specified range");
+	SETPREF ("dbg.trace.libs", "true", "Trace library code too");
 	SETPREF ("dbg.exitkills", "true", "Kill process on exit");
 	SETCB ("dbg.consbreak", "false", &cb_consbreak, "SIGINT handle for attached processes");
 
@@ -2219,6 +2284,8 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("cmd.esil.mdev", "", &cb_cmd_esil_mdev, "Command to run when memory device address is accessed");
 	SETCB ("cmd.esil.intr", "", &cb_cmd_esil_intr, "Command to run when an esil interrupt happens");
 	SETCB ("cmd.esil.trap", "", &cb_cmd_esil_trap, "Command to run when an esil trap happens");
+	SETCB ("cmd.esil.todo", "", &cb_cmd_esil_todo, "Command to run when the esil instruction contains TODO");
+	SETCB ("cmd.esil.ioer", "", &cb_cmd_esil_ioer, "Command to run when esil fails to IO (invalid read/write)");
 
 	/* filesystem */
 	n = NODECB ("fs.view", "normal", &cb_fsview);
@@ -2231,6 +2298,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("hex.compact", "false", &cb_hexcompact, "Show smallest 16 byte col hexdump (60 columns)");
 	SETI ("hex.flagsz", 0, "If non zero, overrides the flag size in pxa");
 	SETICB ("hex.cols", 16, &cb_hexcols, "Number of columns in hexdump");
+	SETI ("hex.pcols", 40, "Number of pixel columns for prc");
 	SETI ("hex.depth", 5, "Maximal level of recurrence while telescoping memory");
 	SETPREF ("hex.onechar", "false", "Number of columns in hexdump");
 	SETICB ("hex.stride", 0, &cb_hexstride, "Line stride in hexdump (default is 0)");
@@ -2429,7 +2497,8 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("file.md5", "", "MD5 sum of current file");
 	SETPREF ("file.info", "true", "RBin info loaded");
 	SETPREF ("file.offset", "", "Offset where the file will be mapped at");
-	SETPREF ("file.path", "", "Path of current file");
+	SETCB ("file.path", "", &cb_filepath, "Path of current file");
+	SETPREF ("file.lastpath", "", "Path of current file");
 	SETPREF ("file.sha1", "", "SHA1 hash of current file");
 	SETPREF ("file.type", "", "Type of current file");
 	n = NODECB ("file.loadmethod", "fail", &cb_fileloadmethod);

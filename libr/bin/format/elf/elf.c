@@ -707,6 +707,9 @@ static Sdb *store_versioninfo_gnu_verdef(ELFOBJ *bin, Elf_(Shdr) *shdr, int sz) 
 		return false;
 	}
 	Elf_(Verdef) *defs = calloc (shdr->sh_size, sizeof (char));
+	if (!defs) {
+		return false;
+	}
 	if (bin->shstrtab && shdr->sh_name < bin->shstrtab_size) {
 		section_name = &bin->shstrtab[shdr->sh_name];
 	}
@@ -1796,6 +1799,8 @@ char* Elf_(r_bin_elf_get_arch)(ELFOBJ *bin) {
 	case EM_ARM:
 	case EM_AARCH64:
 		return strdup ("arm");
+	case EM_HEXAGON:
+		return strdup ("hexagon");
 	case EM_BLACKFIN:
 		return strdup ("blackfin");
 	case EM_SPARC:
@@ -1928,14 +1933,13 @@ char* Elf_(r_bin_elf_get_file_type)(ELFOBJ *bin) {
 	case ET_DYN:  return strdup ("DYN (Shared object file)");
 	case ET_CORE: return strdup ("CORE (Core file)");
 	}
-
 	if ((e_type >= ET_LOPROC) && (e_type <= ET_HIPROC)) {
 		return r_str_newf ("Processor Specific: %x", e_type);
-	} else if ((e_type >= ET_LOOS) && (e_type <= ET_HIOS)) {
-		return r_str_newf ("OS Specific: %x", e_type);
-	} else {
-		return r_str_newf ("<unknown>: %x", e_type);
 	}
+	if ((e_type >= ET_LOOS) && (e_type <= ET_HIOS)) {
+		return r_str_newf ("OS Specific: %x", e_type);
+	}
+	return r_str_newf ("<unknown>: %x", e_type);
 }
 
 char* Elf_(r_bin_elf_get_elf_class)(ELFOBJ *bin) {
@@ -2397,6 +2401,7 @@ static void fill_symbol_bind_and_type (struct r_bin_elf_symbol_t *ret, Elf_(Sym)
 	switch (ELF_ST_BIND(sym->st_info)) {
 	case STB_LOCAL:  s_bind ("LOCAL"); break;
 	case STB_GLOBAL: s_bind ("GLOBAL"); break;
+	case STB_WEAK:   s_bind ("WEAK"); break;
 	case STB_NUM:    s_bind ("NUM"); break;
 	case STB_LOOS:   s_bind ("LOOS"); break;
 	case STB_HIOS:   s_bind ("HIOS"); break;
@@ -2637,7 +2642,7 @@ static int Elf_(fix_symbols)(ELFOBJ *bin, int nsym, int type, RBinElfSymbol **sy
 			/* find match in phdr */
 			p = phdr_symbols;
 			while (!p->last) {
-				if (d->offset == p->offset) {
+				if (p->offset && d->offset == p->offset) {
 					p->in_shdr = true;
 					if (*p->name && strcmp (d->name, p->name)) {
 						strcpy (d->name, p->name);

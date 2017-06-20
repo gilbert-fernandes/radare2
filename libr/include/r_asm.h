@@ -111,6 +111,8 @@ typedef struct r_asm_t {
 	char *features;
 	int invhex; // invalid instructions displayed in hex
 	int pcalign;
+	int dataalign;
+	SdbHash *flags;
 } RAsm;
 
 typedef int (*RAsmModifyCallback)(RAsm *a, ut8 *buf, int field, ut64 val);
@@ -244,6 +246,7 @@ extern RAsmPlugin r_asm_plugin_xtensa;
 extern RAsmPlugin r_asm_plugin_tricore;
 extern RAsmPlugin r_asm_plugin_pic18c;
 extern RAsmPlugin r_asm_plugin_rsp;
+extern RAsmPlugin r_asm_plugin_hexagon_gnu;
 extern RAsmPlugin r_asm_plugin_wasm;
 extern RAsmPlugin r_asm_plugin_tms320c64x;
 

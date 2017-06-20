@@ -10,38 +10,54 @@ static int r_debug_session_lastid(RDebug *dbg) {
 }
 
 R_API void r_debug_session_list(RDebug *dbg) {
-	const char *comment;
 	ut32 count = 0;
-	RListIter *iterse, *itersn;
+	RListIter *iterse, *itersn, *iterpg;
 	RDebugSnap *snap;
+	RDebugSnapDiff *diff;
 	RDebugSession *session;
+	RPageData *page;
+
 	r_list_foreach (dbg->sessions, iterse, session) {
 		count = 0;
-		dbg->cb_printf ("session:%2d\tat:0x%08"PFMT64x "\n", session->key.id, session->key.addr);
-		r_list_foreach (session->memlist, itersn, snap) {
-			comment = "";
-			if (snap->comment && *snap->comment) {
-				comment = snap->comment;
+		dbg->cb_printf ("session:%2d   at:0x%08"PFMT64x "\n", session->key.id, session->key.addr);
+		r_list_foreach (session->memlist, itersn, diff) {
+			snap = diff->base;
+			dbg->cb_printf ("  - %d 0x%08"PFMT64x " - 0x%08"PFMT64x " size: %d ",
+				count, snap->addr, snap->addr_end, snap->size);
+			dbg->cb_printf ("(pages: ");
+			r_list_foreach (diff->pages, iterpg, page) {
+				dbg->cb_printf ("%d ", page->page_off);
 			}
-			dbg->cb_printf ("%d 0x%08"PFMT64x " - 0x%08"PFMT64x " size: %d crc: %x  --  %s\n",
-				count, snap->addr, snap->addr_end, snap->size, snap->crc, comment);
+			dbg->cb_printf (")\n");
 			count++;
 		}
 	}
 }
 
-R_API bool r_debug_session_add(RDebug *dbg) {
+R_API RDebugSession *r_debug_session_add(RDebug *dbg, RListIter **tail) {
 	RDebugSession *session;
-	RDebugSnap *snap;
-	RListIter *iter, *start;
+	RDebugSnapDiff *diff;
+	RListIter *iter;
+	RDebugMap *map;
 	ut64 addr;
-	int i;
-	session = R_NEW0 (RDebugSession);
-	if (!session) {
-		return false;
-	}
+	int i, perms = R_IO_RW;
 
 	addr = r_debug_reg_get (dbg, dbg->reg->name[R_REG_NAME_PC]);
+	/* Session has already existed at this addr? */
+	r_list_foreach (dbg->sessions, iter, session) {
+		if (session->key.addr == addr) {
+			if (tail) {
+				*tail = iter;
+			}
+			return session;
+		}
+	}
+
+	session = R_NEW0 (RDebugSession);
+	if (!session) {
+		return NULL;
+	}
+
 	session->key = (RDebugKey) {
 		addr, r_debug_session_lastid (dbg)
 	};
@@ -54,27 +70,29 @@ R_API bool r_debug_session_add(RDebug *dbg) {
 	r_reg_arena_push (dbg->reg);
 
 	/* save memory snapshots */
-	session->memlist = r_list_newf (r_debug_snap_free);
-	start = r_list_tail (dbg->snaps);
-	r_debug_snap_all (dbg, R_IO_RW);
-	if (!start) {
-		start = r_list_head (dbg->snaps);
-	} else {
-		start = start->n;
-	}
-	// XXX
-	for (iter = start; iter && (snap = iter->data); iter = iter->n) {
-		r_list_append (session->memlist, snap);
+	session->memlist = r_list_newf (r_debug_diff_free);
+
+	r_debug_map_sync (dbg);
+	r_list_foreach (dbg->maps, iter, map) {
+		if (!perms || (map->perm & perms) == perms) {
+			diff = r_debug_snap_map (dbg, map);
+			if (diff) {
+				/* Add diff history */
+				r_list_append (session->memlist, diff);
+			}
+		}
 	}
 
 	r_list_append (dbg->sessions, session);
-	return true;
+	if (tail) {
+		*tail = dbg->sessions->tail;
+	}
+	return session;
 }
 
-R_API void r_debug_session_set(RDebug *dbg, RDebugSession *session) {
-	RDebugSnap *snap;
+static void r_debug_session_set_registers(RDebug *dbg, RDebugSession *session) {
 	RRegArena *arena;
-	RListIter *iter, *iterr;
+	RListIter *iterr;
 	int i;
 	/* Restore all regsiter values from the stack area pointed by session */
 	r_debug_reg_sync (dbg, R_REG_TYPE_ALL, 0);
@@ -86,10 +104,25 @@ R_API void r_debug_session_set(RDebug *dbg, RDebugSession *session) {
 		}
 	}
 	r_debug_reg_sync (dbg, R_REG_TYPE_ALL, 1);
+}
 
-	/* Restore all memory values from memory snapshots*/
-	r_list_foreach (session->memlist, iter, snap) {
-		r_debug_snap_set (dbg, snap);
+R_API void r_debug_session_set(RDebug *dbg, RDebugSession *session) {
+	RListIter *iter;
+	RDebugSnapDiff *diff;
+	r_debug_session_set_registers (dbg, session);
+	/* Restore all memory values from memory (diff) snapshots */
+	r_list_foreach (session->memlist, iter, diff) {
+		r_debug_diff_set (dbg, diff);
+	}
+}
+
+R_API void r_debug_session_set_base(RDebug *dbg, RDebugSession *before) {
+	RListIter *iter;
+	RDebugSnap *snap;
+	r_debug_session_set_registers (dbg, before);
+	/* Restore all memory values from base memory snapshots */
+	r_list_foreach (dbg->snaps, iter, snap) {
+		r_debug_diff_set_base (dbg, snap);
 	}
 }
 
@@ -101,9 +134,8 @@ R_API bool r_debug_session_set_idx(RDebug *dbg, int idx) {
 	if (!dbg || idx < 0) {
 		return false;
 	}
-
 	r_list_foreach (dbg->sessions, iter, session) {
-		if (count == idx) {
+		if (session->key.id == idx) {
 			r_debug_session_set (dbg, session);
 			return true;
 		}
@@ -112,13 +144,17 @@ R_API bool r_debug_session_set_idx(RDebug *dbg, int idx) {
 	return false;
 }
 
-R_API RDebugSession *r_debug_session_get(RDebug *dbg, ut64 addr) {
+/* Get most recent used session at the time */
+R_API RDebugSession *r_debug_session_get(RDebug *dbg, RListIter *tail) {
 	RDebugSession *session;
-	RListIter *iter;
-	r_list_foreach_prev (dbg->sessions, iter, session) {
-		if (session->key.addr != addr) {
-			return session;
-		}
+	RListIter *prev;
+	if (!tail) {
+		return NULL;
 	}
-	return NULL;
+	prev = tail->p;
+	if (!prev) {
+		return NULL;
+	}
+	session = (RDebugSession *)prev->data;
+	return session;
 }

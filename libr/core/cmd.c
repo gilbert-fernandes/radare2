@@ -55,7 +55,7 @@ static void cmd_debug_reg(RCore *core, const char *str);
 static void recursive_help(RCore *core, const char *cmd) {
 	char *nl, *line;
 	if (strchr (cmd, '[')) {
-		eprintf ("Skip ((%s))\n", cmd);
+		// eprintf ("Skip ((%s))\n", cmd);
 		return;
 	}
 	char *msg = r_core_cmd_str (core, cmd);
@@ -306,6 +306,9 @@ static int cmd_rap(void *data, const char *input) {
 		}
 		r_core_rtr_http (core, getArg (input[1], 'H'), input + 1);
 		break;
+	case 'g':
+		r_core_rtr_gdb (core, getArg (input[1], 'g'), input + 1);
+		break;
 	case '?': r_core_rtr_help (core); break;
 	case '+': r_core_rtr_add (core, input + 1); break;
 	case '-': r_core_rtr_remove (core, input + 1); break;
@@ -455,7 +458,7 @@ R_API int r_core_run_script (RCore *core, const char *file) {
 			free (out);
 		}
 	} else if (r_parse_is_c_file (file)) {
-		char *out = r_parse_c_file (file);
+		char *out = r_parse_c_file (core->anal, file);
 		if (out) {
 			r_cons_strcat (out);
 			sdb_query_lines (core->anal->sdb_types, out);
@@ -1132,6 +1135,14 @@ static int cmd_system(void *data, const char *input) {
 	ut64 n;
 	int ret = 0;
 	switch (*input) {
+	case '-':
+		if (input[1]) {
+			r_line_hist_free();
+			r_line_hist_save (R2_HOMEDIR"/history");
+		} else {
+			r_line_hist_free();
+		}
+		break;
 	case '=':
 		if (input[1] == '?') {
 			r_cons_printf ("Usage: !=[!]  - enable/disable remote commands\n");
@@ -1189,7 +1200,6 @@ static int cmd_system(void *data, const char *input) {
 }
 
 R_API int r_core_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
-	char *_ptr;
 #if __UNIX__ || __CYGWIN__
 	int stdout_fd, fds[2];
 	int child;
@@ -1208,11 +1218,7 @@ R_API int r_core_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
 		r_config_set_i (core->config, "scr.color", 0);
 	}
 	if (*shell_cmd=='!') {
-		_ptr = (char *)r_str_lastbut (shell_cmd, '~', "\"");
-		if (_ptr) {
-			*_ptr = '\0';
-			_ptr++;
-		}
+		r_cons_grep_parsecmd (shell_cmd, "\"");
 		olen = 0;
 		out = NULL;
 		// TODO: implement foo
@@ -1220,9 +1226,6 @@ R_API int r_core_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd) {
 		r_sys_cmd_str_full (shell_cmd + 1, str, &out, &olen, NULL);
 		free (str);
 		r_cons_memcat (out, olen);
-		if (_ptr) {
-			r_cons_grep (_ptr);
-		}
 		free (out);
 		ret = 0;
 	}
@@ -1306,7 +1309,7 @@ static int r_core_cmd_subst(RCore *core, char *cmd) {
 	// lines starting with # are ignored (never reach cmd_hash()), except #! and #?
 	if (!icmd || (cmd[0] == '#' && cmd[1] != '!' && cmd[1] != '?')) {
 		goto beach;
-	}	
+	}
 	cmt = *icmd ? strchr (icmd + 1, '#'): NULL;
 	if (cmt && (cmt[1] == ' ' || cmt[1] == '\t')) {
 		*cmt = 0;
@@ -1448,7 +1451,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon) {
 			if (haveQuote) {
 			//	*cmd = 0;
 				cmd++;
-				p = find_eoq (cmd + 1);
+				p = cmd[0] ? find_eoq (cmd + 1) : NULL;
 				if (!p || !*p) {
 					eprintf ("Missing \" in (%s).", cmd);
 					return false;
@@ -1654,10 +1657,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon) {
 				r_cons_break_push (NULL, NULL);
 				recursive_help (core, cmd);
 				r_cons_break_pop ();
-				//grep the content
-				if (ptr[2] == '~') {
-					r_cons_grep (ptr + 3);
-				}
+				r_cons_grep_parsecmd (ptr + 2, "`");
 				if (scr_html != -1) {
 					r_config_set_i (core->config, "scr.html", scr_html);
 				}
@@ -1859,23 +1859,12 @@ next2:
 	// TODO must honor " and `
 	core->fixedblock = false;
 
-	/* grep the content */
-	ptr = (char *)r_str_lastbut (cmd, '~', quotestr);
-	if (ptr && ptr>cmd) {
-		char *escape = ptr - 1;
-		if (*escape == '\\') {
-			memmove (escape, ptr, strlen (escape));
-			ptr = NULL;
-		}
-	} else if (ptr == cmd && *ptr && ptr[1] == '?') {
+	if (r_str_endswith (cmd, "~?") && cmd[2] == '\0') {
 		r_cons_grep_help ();
-		return  true;
+		return true;
 	}
-	if (ptr && *cmd != '.') {
-		*ptr = '\0';
-		ptr++;
-		cmd = r_str_chop (cmd);
-		r_cons_grep (ptr);
+	if (*cmd != '.') {
+		r_cons_grep_parsecmd (cmd, quotestr);
 	}
 
 	/* temporary seek commands */
@@ -2619,7 +2608,7 @@ R_API int r_core_cmd_foreach(RCore *core, const char *cmd, char *each) {
 				r_cmd_macro_call (&core->rcmd->macro, each + 2);
 				if (!core->rcmd->macro.brk_value) {
 					break;
-				}		
+				}
 				addr = core->rcmd->macro._brk_value;
 				sprintf (cmd2, "%s @ 0x%08"PFMT64x"", cmd, addr);
 				eprintf ("0x%08"PFMT64x" (%s)\n", addr, cmd2);
@@ -2737,7 +2726,7 @@ R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 
 	if (!cstr || *cstr == '|') {
 		// raw comment syntax
-		return false;
+		goto beach; // false;
 	}
 	if (!strncmp (cstr, "/*", 2)) {
 		if (r_sandbox_enable (0)) {
@@ -2790,13 +2779,29 @@ R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 		}
 		rcmd = ptr + 1;
 	}
+	r_th_lock_leave (core->lock);
+	/* run pending analysis commands */
+	if (core->anal->cmdtail) {
+		char *res = core->anal->cmdtail;
+		core->anal->cmdtail = NULL;
+		r_core_cmd_lines (core, res);
+		free (res);
+	}
 	core->cmd_depth++;
 	free (ocmd);
 	free (core->oobi);
 	core->oobi = NULL;
 	core->oobi_len = 0;
+	return ret;
 beach:
 	r_th_lock_leave (core->lock);
+	/* run pending analysis commands */
+	if (core->anal->cmdtail) {
+		char *res = core->anal->cmdtail;
+		core->anal->cmdtail = NULL;
+		r_core_cmd0 (core, res);
+		free (res);
+	}
 	return ret;
 }
 
@@ -2940,6 +2945,29 @@ R_API int r_core_flush(void *user, const char *cmd) {
 R_API char *r_core_cmd_str_pipe(RCore *core, const char *cmd) {
 	char *s, *tmp = NULL;
 	if (r_sandbox_enable (0)) {
+		char *p = (*cmd != '"')? strchr (cmd, '|'): NULL;
+		if (p) {
+			// This code works but its pretty ugly as its a workaround to
+			// make the webserver work as expected, this was broken some
+			// weeks. let's use this hackaround for now
+			char *c = strdup (cmd);
+			c[p - cmd] = 0;
+			if (!strcmp (p + 1, "H")) {
+				int sh = r_config_get_i (core->config, "scr.html");
+				r_config_set_i (core->config, "scr.html", 1);
+				char *ret = r_core_cmd_str (core, c);
+				r_config_set_i (core->config, "scr.html", sh);
+				free (c);
+				return ret;
+			} else {
+				int sh = r_config_get_i (core->config, "scr.color");
+				r_config_set_i (core->config, "scr.color", 0);
+				char *ret = r_core_cmd_str (core, c);
+				r_config_set_i (core->config, "scr.color", sh);
+				free (c);
+				return ret;
+			}
+		}
 		return r_core_cmd_str (core, cmd);
 	}
 	r_cons_reset ();
@@ -3090,4 +3118,5 @@ R_API void r_core_cmd_init(RCore *core) {
 	r_cmd_add (core->rcmd, "u",        "uname/undo", &cmd_uname);
 	r_cmd_add (core->rcmd, "quit",     "exit program session", &cmd_quit);
 	r_cmd_add (core->rcmd, "Q",        "alias for q!", &cmd_Quit);
+	r_cmd_add (core->rcmd, "L",        "manage dynamically loaded plugins", &cmd_plugins);
 }

@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <r_core.h>
 #include <stdlib.h>
@@ -184,6 +184,8 @@ R_API void r_core_sysenv_help(const RCore *core) {
 		"!!", "ls~txt", "print output of 'ls' and grep for 'txt'",
 		".!", "rabin2 -rpsei ${FILE}", "run each output line as a r2 cmd",
 		"!", "echo $SIZE", "display file size",
+		"!-", "", "clear history in current session",
+		"!-*", "", "clear and save empty history log",
 		"!=!", "", "enable remotecmd mode",
 		"=!=", "", "disable remotecmd mode",
 		"\nEnvironment:", "", "",
@@ -519,21 +521,44 @@ R_API int r_core_bin_rebase(RCore *core, ut64 baddr) {
 	return 1;
 }
 
-R_API int r_core_bin_load(RCore *r, const char *filenameuri, ut64 baddr) {
+static void load_scripts_for(RCore *core, const char *name) {
+	// TODO: 
+	char *file;
+	RListIter *iter;
+	char *hdir = r_str_newf (R2_HOMEDIR "/rc.d/bin-%s", name);
+	char *path = r_str_home (hdir);
+	RList *files = r_sys_dir (path);
+	if (!r_list_empty (files)) {
+		eprintf ("[binrc] path: %s\n", path);
+	}
+	r_list_foreach (files, iter, file) {
+		if (*file && *file != '.') {
+			eprintf ("[binrc] loading %s\n", file);
+			r_core_cmdf (core, ". %s/%s", path, file);
+		}
+	}
+	r_list_free (files);
+	free (path);
+	free (hdir);
+}
+
+R_API bool r_core_bin_load(RCore *r, const char *filenameuri, ut64 baddr) {
 	const char *suppress_warning = r_config_get (r->config, "file.nowarn");
 	RCoreFile *cf = r_core_file_cur (r);
 	RBinFile *binfile = NULL;
-	RIODesc *desc = cf? cf->desc: NULL;
 	RBinPlugin *plugin = NULL;
 	int is_io_load;
+	if (!cf) {
+		return false;
+	}
 	// NULL deref guard
-	if (!desc) {
+	if (!cf->desc) {
 		is_io_load = false;
 	} else {
-		is_io_load = desc && desc->plugin;
+		is_io_load = cf->desc && cf->desc->plugin;
 	}
 
-	if (cf) {
+	if (cf && cf->desc) {
 		if (!filenameuri || !*filenameuri) {
 			filenameuri = cf->desc->name;
 		} else if (cf->desc->name && strcmp (filenameuri, cf->desc->name)) {
@@ -557,20 +582,18 @@ R_API int r_core_bin_load(RCore *r, const char *filenameuri, ut64 baddr) {
 	r->bin->maxstrbuf = r_config_get_i (r->config, "bin.maxstrbuf");
 	if (is_io_load) {
 		// TODO? necessary to restore the desc back?
-		// RIODesc *oldesc = desc;
 		// Fix to select pid before trying to load the binary
-		if ((desc->plugin && desc->plugin->isdbg) || r_config_get_i (r->config, "cfg.debug")) {
+		if ((cf->desc->plugin && cf->desc->plugin->isdbg) || r_config_get_i (r->config, "cfg.debug")) {
 			r_core_file_do_load_for_debug (r, baddr, filenameuri);
 		} else {
 			ut64 laddr = r_config_get_i (r->config, "bin.laddr");
 			r_core_file_do_load_for_io_plugin (r, baddr, laddr);
 		}
 		// Restore original desc
-		r_io_use_desc (r->io, desc);
+		r_io_use_desc (r->io, cf->desc);
 	}
-
-	if (cf && binfile && desc) {
-		binfile->fd = desc->fd;
+	if (cf && binfile && cf->desc) {
+		binfile->fd = cf->desc->fd;
 	}
 	binfile = r_bin_cur (r->bin);
 	if (r->bin->cur && r->bin->cur->curplugin && r->bin->cur->curplugin->strfilter) {
@@ -581,6 +604,10 @@ R_API int r_core_bin_load(RCore *r, const char *filenameuri, ut64 baddr) {
 	}
 	r_core_bin_set_env (r, binfile);
 	plugin = r_bin_file_cur_plugin (binfile);
+	if (plugin && plugin->name) {
+		load_scripts_for (r, plugin->name);
+	}
+
 	if (plugin && plugin->name && !strncmp (plugin->name, "any", 3)) {
 		// set use of raw strings
 		//r_config_set (r->config, "bin.rawstr", "true");

@@ -5,6 +5,7 @@
 #include "r_core.h"
 #include "r_print.h"
 #include "r_bin.h"
+#include "r_debug.h"
 
 
 static inline ut32 find_binfile_id_by_fd (RBin *bin, ut32 fd) {
@@ -302,8 +303,7 @@ R_API void r_core_file_reopen_debug (RCore *core, const char *args) {
 	r_core_file_reopen (core, newfile, 0, 2);
 	newfile = newfile2;
 #if !__WINDOWS__
-	//XXX: need cmd_debug.h for r_debug_get_baddr
-	ut64 new_baddr = r_debug_get_baddr (core, newfile);
+	ut64 new_baddr = r_debug_get_baddr (core->dbg, newfile);
 	ut64 old_baddr = r_config_get_i (core->config, "bin.baddr");
 	if (old_baddr != new_baddr) {
 		r_bin_set_baddr (core->bin, new_baddr);
@@ -330,8 +330,8 @@ static int cmd_open(void *data, const char *input) {
 		"o","","list opened files",
 		"o=","","list opened files (ascii-art bars)",
 		"o*","","list opened files in r2 commands",
-		"oa"," [?] [addr]","Open bin info from the given address",
-		"ob"," [?] [lbdos] [...]","list open binary files backed by fd",
+		"oa","[?] [addr]","Open bin info from the given address",
+		"ob","[?] [lbdos] [...]","list open binary files backed by fd",
 		"oc"," [file]","open core file, like relaunching r2",
 		"oi","[-|idx]","alias for o, but using index instead of fd",
 		"oj","[?]	","list opened files in JSON format",
@@ -693,22 +693,15 @@ static int cmd_open(void *data, const char *input) {
 		}
 		break;
 	case 'c':
-		if ('?' == input[1]) {
-			const char *help_msg[] = {
-				"oc"," [file]","open core file, like relaunching r2",NULL
-			};
-			r_core_cmd_help (core, help_msg);
-			break;
-		}
-		if (r_sandbox_enable (0)) {
-			eprintf ("This command is disabled in sandbox mode\n");
-			return 0;
-		}
-		// memleak? lose all settings wtf
-		// if load fails does not fallbacks to previous file
-		r_core_fini (core);
-		r_core_init (core);
 		if (input[1] && input[2]) {
+			if (r_sandbox_enable (0)) {
+				eprintf ("This command is disabled in sandbox mode\n");
+				return 0;
+			}
+			// memleak? lose all settings wtf
+			// if load fails does not fallbacks to previous file
+			r_core_fini (core);
+			r_core_init (core);
 			if (!r_core_file_open (core, input + 2, R_IO_READ, 0)) {
 				eprintf ("Cannot open file\n");
 			}

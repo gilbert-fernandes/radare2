@@ -52,30 +52,26 @@ static thread_t getcurthread (RDebug *dbg) {
 
 static xnu_thread_t* get_xnu_thread(RDebug *dbg, int tid) {
 	RListIter *it = NULL;
-	if (!dbg) {
-		return NULL;
-	}
-	if (tid < 0) {
+	if (!dbg || tid < 0) {
 		return NULL;
 	}
 	if (!xnu_update_thread_list (dbg)) {
-		eprintf ("Failed to update thread_list xnu_reg_write\n");
+		eprintf ("Failed to update thread_list xnu_udpate_thread_list\n");
 		return NULL;
 	}
 	//TODO get the current thread
 	it = r_list_find (dbg->threads, (const void *)(size_t)&tid,
 			  (RListComparator)&thread_find);
-	if (it) {
-		return (xnu_thread_t *)it->data;
-	}
-	tid = getcurthread (dbg);
-	it = r_list_find (dbg->threads, (const void *)(size_t)&tid,
+	if (!it) {
+		tid = getcurthread (dbg);
+		it = r_list_find (dbg->threads, (const void *)(size_t)&tid,
 			  (RListComparator)&thread_find);
-	if (it) {
-		return (xnu_thread_t *)it->data;
+		if (!it) {
+			eprintf ("Thread not found get_xnu_thread\n");
+			return NULL;
+		}
 	}
-	eprintf ("Thread not found get_xnu_thread\n");
-	return NULL;
+	return (xnu_thread_t *)it->data;
 }
 
 static task_t task_for_pid_workaround(int Pid) {
@@ -84,12 +80,11 @@ static task_t task_for_pid_workaround(int Pid) {
 	mach_port_t psDefault_control = 0;
 	task_array_t tasks = NULL;
 	mach_msg_type_number_t numTasks = 0;
-	kern_return_t kr;
 	int i;
 	if (Pid == -1) {
 		return 0;
 	}
-	kr = processor_set_default (myhost, &psDefault);
+	kern_return_t kr = processor_set_default (myhost, &psDefault);
 	if (kr != KERN_SUCCESS) {
 		return 0;
 	}
@@ -111,10 +106,11 @@ static task_t task_for_pid_workaround(int Pid) {
 		return tasks[0];
 	}
 	for (i = 0; i < numTasks; i++) {
-		int pid;
+		int pid = 0;
 		pid_for_task (i, &pid);
-		if (pid == Pid)
-			return (tasks[i]);
+		if (pid == Pid) {
+			return tasks[i];
+		}
 	}
 	return 0;
 }
@@ -197,6 +193,7 @@ int xnu_detach(RDebug *dbg, int pid) {
 	//we mark the task as not longer available since we deallocated the ref
 	task_dbg = 0;
 	r_list_free (dbg->threads);
+	dbg->threads = NULL;
 	return true;
 #endif
 }
@@ -273,9 +270,10 @@ int xnu_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
 	}
 	switch (type) {
 	case R_REG_TYPE_DRX:
-#if __x86_64__ || __i386__
-		memcpy (&th->drx, buf, R_MIN (size, sizeof (th->drx)));
-
+#if __x86_64__
+		memcpy (&th->drx.uds.ds32, buf, R_MIN (size, sizeof (th->drx)));
+#elif __i386__
+		memcpy (&th->drx.uds.ds64, buf, R_MIN (size, sizeof (th->drx)));
 #elif __arm || __arm64 || __aarch64
 #if defined (ARM_DEBUG_STATE32) && (defined (__arm64__) || defined (__aarch64__))
 		memcpy (&th->debug.drx32, buf, R_MIN (size, sizeof (th->debug.drx32)));
@@ -795,8 +793,8 @@ static uid_t uidFromPid(pid_t pid) {
 	size_t procBufferSize = sizeof (process);
 
 	// Compose search path for sysctl. Here you can specify PID directly.
-	const u_int pathLenth = 4;
-	int path[pathLenth] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+	int path[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+	const int pathLenth = (sizeof (path) / sizeof (int));
 	int sysctlResult = sysctl (path, pathLenth, &process, &procBufferSize, NULL, 0);
 	// If sysctl did not fail and process with PID available - take UID.
 	if ((sysctlResult == 0) && (procBufferSize != 0)) {

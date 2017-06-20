@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2016 - pancake */
+/* radare - LGPL - Copyright 2007-2017 - pancake */
 
 #include <r_flag.h>
 #include <r_util.h>
@@ -43,7 +43,6 @@ static void item_list_kv_free(HtKv *kv) {
 	r_list_free (kv->value);
 	free (kv);
 }
-
 
 static ut64 num_callback(RNum *user, const char *name, int *ok) {
 	RFlag *f = (RFlag*)user;
@@ -504,19 +503,22 @@ R_API void r_flag_item_set_realname(RFlagItem *item, const char *realname) {
 /* change the name of a flag item, if the new name is available.
  * true is returned if everything works well, false otherwise */
 R_API int r_flag_rename(RFlag *f, RFlagItem *item, const char *name) {
-	RFlagItem *p;
 	if (!f || !item || !name || !*name) {
 		return false;
 	}
-	p = ht_find (f->ht_name, name, NULL);
-	if (p) {
-		return false;
-	}
+#if 0
+	ut64 off = item->offset;
+	int size = item->size;
+	r_flag_unset (f, item);
+	r_flag_set (f, name, off, size);
+	return true;
+#else
+	ht_delete (f->ht_name, item->name);
 	if (!set_name (item, name)) {
 		return false;
 	}
-	ht_delete (f->ht_name, name);
 	ht_insert (f->ht_name, item->name, item);
+#endif
 	return true;
 }
 
