@@ -12,6 +12,7 @@ int gdbr_init(libgdbr_t *g, bool is_server) {
 	memset (g, 0, sizeof (libgdbr_t));
 	g->no_ack = false;
 	g->stub_features.extended_mode = -1;
+	g->stub_features.pkt_sz = 64;
 	g->remote_file_fd = -1;
 	g->is_server = is_server;
 	g->send_max = 2500;
@@ -37,12 +38,16 @@ int gdbr_init(libgdbr_t *g, bool is_server) {
 		R_FREE (g->read_buff);
 		return -1;
 	}
+	g->remote_type = GDB_REMOTE_TYPE_GDB;
 	return 0;
 }
 
 int gdbr_set_architecture(libgdbr_t *g, const char *arch, int bits) {
 	if (!g) {
 		return -1;
+	}
+	if (g->target.valid && g->registers) {
+		return 0;
 	}
 	if (!strcmp (arch, "mips")) {
 		g->registers = gdb_regs_mips;
@@ -76,9 +81,9 @@ int gdbr_cleanup(libgdbr_t *g) {
 	if (!g) {
 		return -1;
 	}
-	free (g->data);
-	free (g->send_buff);
+	R_FREE (g->data);
 	g->send_len = 0;
-	free (g->read_buff);
+	R_FREE (g->send_buff);
+	R_FREE (g->read_buff);
 	return 0;
 }

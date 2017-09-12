@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015-2016 - pancake */
+/* radare - LGPL - Copyright 2015-2017 - pancake */
 
 #include <r_core.h>
 #define TYPE_NONE 0
@@ -174,6 +174,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	r_config_save_num (hc, "asm.offset", "asm.flags", "asm.fcnlines", "asm.comments", NULL);
 	r_config_save_num (hc, "asm.functions", "asm.section", "asm.cmtcol", "asm.filter", NULL);
 	r_config_save_num (hc, "scr.color", "asm.emustr", "asm.emu", "asm.emuwrite", NULL);
+	r_config_save_num (hc, "io.cache", NULL);
 	if (!fcn) {
 		eprintf ("Cannot find function in 0x%08"PFMT64x"\n", core->offset);
 		r_config_hold_free (hc);
@@ -196,18 +197,17 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	r_config_set_i (core->config, "asm.tabs", 0);
 	r_config_set_i (core->config, "asm.section", 0);
 	r_config_set_i (core->config, "asm.cmtcol", 30);
+	r_config_set_i (core->config, "io.cache", 1);
 	r_core_cmd0 (core, "aeim");
 
 	db = sdb_new0 ();
-
-	/* */
 	// walk all basic blocks
 	// define depth level for each block
 	// use it for indentation
 	// asm.pseudo=true
 	// asm.decode=true
 	RAnalBlock *bb = r_list_first (fcn->bbs);
-	char indentstr[1024];
+	char indentstr[1024] = {0};
 	int n_bb = r_list_length (fcn->bbs);
 	r_cons_printf ("function %s () {", fcn->name);
 	int indent = 1;
@@ -219,25 +219,33 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 #define K_ELSE(x) sdb_fmt(0,"else.%"PFMT64x,x)
 #define K_INDENT(x) sdb_fmt(0,"loc.%"PFMT64x,x)
 #define SET_INDENT(x) { memset (indentstr, ' ', x*I_TAB); indentstr [(x*I_TAB)-2] = 0; }
-		if (!bb) break;
+		if (!bb) {
+			break;
+		}
 		r_cons_push ();
+		bool html = r_config_get_i (core->config, "scr.html");
+		r_config_set_i (core->config, "scr.html", 0);
 		char *code = r_core_cmd_str (core, sdb_fmt (0, "pD %d @ 0x%08"PFMT64x"\n", bb->size, bb->addr));
 		r_cons_pop ();
+		r_config_set_i (core->config, "scr.html", html);
+		if (indent * I_TAB + 2 >= sizeof (indentstr)) {
+			indent = (sizeof (indentstr) / I_TAB) - 4;
+		}
 		memset (indentstr, ' ', indent * I_TAB);
 		indentstr [(indent * I_TAB) - 2] = 0;
 		code = r_str_prefix_all (code, indentstr);
+		if (!code) {
+			break;
+		}
 		int len = strlen (code);
 		code[len - 1] = 0; // chop last newline
-		//r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);
-		//if (nindent != indent) {
-		//	r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);
-		//}
 		find_and_change (code, len);
 		if (!sdb_const_get (db, K_MARK (bb->addr), 0)) {
 			bool mustprint = !queuegoto || queuegoto != bb->addr;
 			if (mustprint) {
 				if (queuegoto) {
-					r_cons_printf ("\n%s  goto loc_0x%llx", indentstr, queuegoto);
+					r_cons_printf ("\n%s  goto loc_0x%llx",
+						indentstr, queuegoto);
 					queuegoto = 0LL;
 				}
 				r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);

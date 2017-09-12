@@ -1,6 +1,7 @@
 /* radare - LGPL - Copyright 2009-2017 - pancake, nibble */
 
 #include <stdio.h>
+#include <r_core.h>
 #include <r_types.h>
 #include <r_util.h>
 #include <r_asm.h>
@@ -145,6 +146,7 @@ R_API RAsm *r_asm_new() {
 	}
 	a->dataalign = 1;
 	a->bits = R_SYS_BITS;
+	a->bitshift = 0;
 	a->syntax = R_ASM_SYNTAX_INTEL;
 	a->plugins = r_list_newf ((RListFree)plugin_free);
 	if (!a->plugins) {
@@ -197,6 +199,7 @@ R_API RAsm *r_asm_free(RAsm *a) {
 			r_list_free (a->plugins);
 			a->plugins = NULL;
 		}
+		r_syscall_free (a->syscall);
 		free (a->cpu);
 		sdb_free (a->pair);
 		ht_free (a->flags);
@@ -306,8 +309,8 @@ static int has_bits(RAsmPlugin *h, int bits) {
 R_API void r_asm_set_cpu(RAsm *a, const char *cpu) {
 	if (a) {
 		free (a->cpu);
+		a->cpu = cpu? strdup (cpu): NULL;
 	}
-	a->cpu = cpu? strdup (cpu): NULL;
 }
 
 R_API int r_asm_set_bits(RAsm *a, int bits) {
@@ -363,11 +366,12 @@ R_API int r_asm_set_pc(RAsm *a, ut64 pc) {
 
 R_API int r_asm_disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	int oplen, ret;
-	if (!a || !buf) { //  || !op || !buf) {
+	if (!a || !buf || !op) {
 		return -1;
 	}
 	ret = op->payload = 0;
 	op->size = 4;
+	op->bitsize = 0;
 	if (len < 1) {
 		return 0;
 	}
@@ -386,15 +390,32 @@ R_API int r_asm_disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 		}
 	}
 	if (a->cur && a->cur->disassemble) {
-		ret = a->cur->disassemble (a, op, buf, len);
+		// shift buf N bits
+		if (a->bitshift > 0) {
+			ut8 *tmp = calloc (len, 1);
+			if (tmp) {
+				r_mem_copybits_delta (tmp, 0, buf, a->bitshift, (len * 8) - a->bitshift);
+				ret = a->cur->disassemble (a, op, tmp, len);
+				free (tmp);
+			}
+		} else {
+			ret = a->cur->disassemble (a, op, buf, len);
+		}
 	}
 	if (ret < 0) {
 		ret = 0;
 	}
 	oplen = r_asm_op_get_size (op);
-	oplen = op->size;
-	if (oplen > len) {
-		oplen = len;
+	if (op->bitsize > 0) {
+		oplen = op->size = op->bitsize / 8;
+		a->bitshift += op->bitsize % 8;
+		int count = a->bitshift / 8;
+		if (count > 0) {
+			oplen = op->size = op->size + count;
+			a->bitshift %= 8;
+		}
+	} else {
+		oplen = op->size;
 	}
 	if (oplen < 1) {
 		oplen = 1;
@@ -418,11 +439,9 @@ R_API int r_asm_disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	}
 	//XXX check against R_ASM_BUFSIZE other oob write
 	memcpy (op->buf, buf, R_MIN (R_ASM_BUFSIZE - 1, oplen));
-	*op->buf_hex = 0;
-	if ((oplen * 4) >= sizeof (op->buf_hex)) {
-		oplen = (sizeof (op->buf_hex) / 4) - 1;
-	}
-	r_hex_bin2str (buf, oplen, op->buf_hex);
+	const int addrbytes = a->user ? ((RCore *)a->user)->io->addrbytes : 1;
+	r_hex_bin2str (buf, R_MIN (addrbytes * oplen,
+		(sizeof (op->buf_hex) - 1) / 2), op->buf_hex);
 	return ret;
 }
 
@@ -548,10 +567,11 @@ R_API int r_asm_assemble(RAsm *a, RAsmOp *op, const char *buf) {
 R_API RAsmCode* r_asm_mdisassemble(RAsm *a, const ut8 *buf, int len) {
 	RStrBuf *buf_asm;
 	RAsmCode *acode;
-	int ret, slen;
 	ut64 pc = a->pc;
 	RAsmOp op;
 	ut64 idx;
+	int ret, slen;
+	const int addrbytes = a->user ? ((RCore *)a->user)->io->addrbytes : 1;
 
 	if (!(acode = r_asm_code_new ())) {
 		return NULL;
@@ -567,7 +587,7 @@ R_API RAsmCode* r_asm_mdisassemble(RAsm *a, const ut8 *buf, int len) {
 	if (!(buf_asm = r_strbuf_new (NULL))) {
 		return r_asm_code_free (acode);
 	}
-	for (idx = ret = slen = 0; idx < len; idx += ret) {
+	for (idx = ret = slen = 0; idx + addrbytes <= len; idx += addrbytes * ret) {
 		r_asm_set_pc (a, pc + idx);
 		ret = r_asm_disassemble (a, &op, buf + idx, len - idx);
 		if (ret < 1) {
@@ -940,7 +960,7 @@ R_API char *r_asm_op_get_asm(RAsmOp *op) {
 R_API int r_asm_op_get_size(RAsmOp *op) {
 	int len;
 	if (!op) {
-		return 0;
+		return 1;
 	}
 	len = op->size - op->payload;
 	if (len < 1) {

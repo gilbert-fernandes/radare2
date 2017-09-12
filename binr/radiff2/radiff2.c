@@ -406,6 +406,10 @@ static ut8 *slurp(RCore **c, const char *file, int *sz) {
 		if (!*c) {
 			*c = opencore (NULL);
 		}
+		if (!*c) {
+			eprintf ("opencore failed\n");
+			return NULL;
+		}
 		io = (*c)->io;
 		d = r_io_open (io, file, 0, 0);
 		if (!d) {
@@ -414,7 +418,7 @@ static ut8 *slurp(RCore **c, const char *file, int *sz) {
 		size = r_io_size (io);
 		if (size > 0 && size < ST32_MAX) {
 			data = calloc (1, size);
-			if (r_io_read_at (io, 0, data, size) == size) {
+			if (r_io_read_at (io, 0, data, size)) {
 				if (sz) {
 					*sz = size;
 				}
@@ -425,7 +429,7 @@ static ut8 *slurp(RCore **c, const char *file, int *sz) {
 		} else {
 			eprintf ("slurp: Invalid file size\n");
 		}
-		r_io_close (io, d);
+		r_io_desc_close (d);
 		return data;
 	}
 	return (ut8 *) r_file_slurp (file, sz);
@@ -673,7 +677,7 @@ int main(int argc, char **argv) {
 		r_anal_diff_setup_i (c2->anal, diffops, threshold, threshold);
 		if (pdc) {
 			if (!addr) {
-				addr = "entry0";
+				//addr = "entry0";
 				addr = "main";
 			}
 			/* should be in mode not in bool pdc */

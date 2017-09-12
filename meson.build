@@ -1,18 +1,30 @@
 project('radare2', 'c')
 
-version = '1.6.0-git'
+# Get r2 version
+r2version = run_command('python', 'sys/version.py')
+if r2version.returncode() != 0
+  r2version = 'unknown-error'
+else
+  r2version = r2version.stdout().strip()
+endif
+
+# Get version_commit
 version_commit = run_command('git', 'rev-list', '--all', '--count')
 if version_commit.returncode() != 0
   version_commit = 0
 else
   version_commit = version_commit.stdout().strip()
 endif
-gittap  = run_command('git', 'describe', '--tags', '--match', '"[0-9]*"')
+
+# Get gittap
+gittap  = run_command('git', 'describe', '--tags', '--match', '[0-9]*')
 if gittap.returncode() != 0
   gittap = ''
 else
   gittap = gittap.stdout().strip()
 endif
+
+# Get gittip
 gittip  = run_command('git', 'rev-parse', 'HEAD')
 if gittip.returncode() != 0
   gittip = 'unknown'
@@ -20,12 +32,18 @@ else
   gittip = gittip.stdout().strip()
 endif
 
-r2birth = run_command('cmd', '/c', 'date /t')
+# Get current date
+if host_machine.system() == 'windows'
+  r2birth = run_command('cmd', '/c', 'echo %date%__%time%')
+else
+  r2birth = run_command('date', '+%Y-%m-%d__%H:%M:%S')
+endif
 if r2birth.returncode() != 0
   r2birth = ''
 else
   r2birth = r2birth.stdout().strip()
 endif
+
 prefix = '/usr/local'
 
 # system dependencies
@@ -46,15 +64,22 @@ endif
 platform_inc = include_directories(['.','../libr/include'])
 if host_machine.system() == 'windows'
   #platform_deps = [cc.find_library('ws2_32')]
-  platform_inc  = include_directories(['.','../libr/include','../libr/include/msvc'])
+  platform_inc = include_directories(['.','../libr/include','../libr/include/msvc'])
   host_os = 'windows'
+  if get_option('default_library') == 'static'
+	if get_option('buildtype') == 'release'
+	  add_global_arguments('/MT', language: 'c')
+	endif
+	message(' ------ WINDOWS VERSION: BUILD STATIC ------')
+  else
+	message(' ------ WINDOWS VERSION: BUILD SHARED ------')
+  endif
 endif
 
 # load plugin configuration
 subdir('libr')
 
 conf_data = configuration_data()
-conf_data.set('version', version)
 conf_data.set('plugins_core', '&r_core_plugin_' + ',&r_core_plugin_'.join(core) + ', 0')
 conf_data.set('plugins_anal', '&r_anal_plugin_' + ',&r_anal_plugin_'.join(anal) + ', 0')
 conf_data.set('plugins_asm', '&r_asm_plugin_' + ',&r_asm_plugin_'.join(asm) + ', 0')
@@ -72,6 +97,7 @@ configure_file(input : 'libr/config.h.in',
                configuration : conf_data)
 
 userconf = configuration_data()
+userconf.set('DEBUGGER', 1)
 userconf.set('PREFIX', prefix)
 userconf.set('LIBDIR', prefix + '/lib')
 userconf.set('INCLUDEDIR', prefix + '/include')
@@ -81,19 +107,27 @@ userconf.set('USE_LIB_MAGIC', 0)
 userconf.set('HAVE_OPENSSL', 0)
 userconf.set('HAVE_FORK', 1)
 userconf.set('WITH_GPL', 1)
-userconf.set('DEBUGGER', 1)
+if host_machine.system() == 'windows'
+userconf.set('HAVE_JEMALLOC', 0)
+else
+userconf.set('HAVE_JEMALLOC', 1)
+endif
 configure_file(input : 'libr/include/r_userconf.h.in',
                output : 'r_userconf.h',
                configuration : userconf)
 
 versionconf = configuration_data()
 versionconf.set('VERSIONCOMMIT', version_commit)
-versionconf.set('GITTAP', gittap)
-versionconf.set('GITTIP', gittip)
-versionconf.set('DATE', r2birth)
+versionconf.set('R2_VERSION', r2version)
+versionconf.set('R2_GITTAP', gittap)
+versionconf.set('R2_GITTIP', gittip)
+versionconf.set('R2_BIRTH', r2birth)
 configure_file(input : 'libr/include/r_version.h.in',
                output : 'r_version.h',
                configuration : versionconf)
+
+# Copy missing header
+run_command('python', '-c', '__import__("shutil").copyfile("shlr/spp/config.def.h", "shlr/spp/config.h")')
 
 subdir('shlr/')
 subdir('libr/util')

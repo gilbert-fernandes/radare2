@@ -45,12 +45,6 @@ int handle_m(libgdbr_t *g) {
 	return send_ack (g);
 }
 
-int handle_cmd(libgdbr_t *g) {
-	unpack_hex (g->data, strlen (g->data), g->data);
-	g->data_len = strlen (g->data) / 2;
-	return send_ack (g);
-}
-
 int handle_qStatus(libgdbr_t *g) {
 	if (!g || !g->data || !*g->data) {
 		return -1;
@@ -81,24 +75,16 @@ int handle_qStatus(libgdbr_t *g) {
 }
 
 int handle_qC(libgdbr_t *g) {
-	char *t1, *t2;
 	// We get process and thread ID
 	if (strncmp (g->data, "QC", 2)) {
 		send_ack (g);
 		return -1;
 	}
-	t2 = g->data + 2;
-	if ((t1 = strchr (g->data, 'p'))) {
-		if (!(t2 = strchr (g->data, '.'))) {
-			send_ack (g);
-			return -1;
-		} else {
-			t1++;
-			g->pid = (int) strtol (t1, NULL, 16);
-			t2++;
-		}
+	g->data[g->data_len] = '\0';
+	if (read_thread_id (g->data + 2, &g->pid, &g->tid, g->stub_features.multiprocess) , 0) {
+		send_ack (g);
+		return -1;
 	}
-	g->tid = (int) strtol (t2, NULL, 16);
 	return send_ack (g);
 }
 
@@ -126,11 +112,6 @@ int handle_fOpen(libgdbr_t *g) {
 	return send_ack (g);
 }
  */
-
-int handle_cont(libgdbr_t *g) {
-	// Possible answers here 'S,T,W,X,O,F'
-	return send_ack (g);
-}
 
 int handle_setbp(libgdbr_t *g) {
 	return send_ack (g);
@@ -201,4 +182,250 @@ int handle_vFile_close(libgdbr_t *g) {
 		return -1;
 	}
 	return send_ack (g);
+}
+
+#include <r_debug.h>
+#include <gdbclient/commands.h>
+
+static int stop_reason_exit(libgdbr_t *g) {
+	int status = 0, pid = g->pid;
+	g->stop_reason.reason = R_DEBUG_REASON_DEAD;
+	if (g->stub_features.multiprocess && g->data_len > 3) {
+		if (sscanf (g->data + 1, "%x;process:%x", &status, &pid) != 2) {
+			eprintf ("Message from remote: %s\n", g->data);
+			return -1;
+		}
+		eprintf ("Process %d exited with status %d\n", pid, status);
+		g->stop_reason.thread.pid = pid;
+		g->stop_reason.thread.tid = pid;
+		g->stop_reason.is_valid = true;
+		return 0;
+	}
+	if (!isxdigit (g->data[1])) {
+		eprintf ("Message from remote: %s\n", g->data);
+		return -1;
+	}
+	status = (int) strtol (g->data + 1, NULL, 16);
+	eprintf ("Process %d exited with status %d\n", g->pid, status);
+	g->stop_reason.thread.pid = pid;
+	g->stop_reason.thread.tid = pid;
+	g->stop_reason.is_valid = true;
+	// Just to be sure, disconnect
+	return gdbr_disconnect (g);
+}
+
+static int stop_reason_terminated(libgdbr_t *g) {
+	int signal = 0, pid = g->pid;
+	g->stop_reason.reason = R_DEBUG_REASON_DEAD;
+	if (g->stub_features.multiprocess && g->data_len > 3) {
+		if (sscanf (g->data + 1, "%x;process:%x", &signal, &pid) != 2) {
+			eprintf ("Message from remote: %s\n", g->data);
+			return -1;
+		}
+		eprintf ("Process %d terminated with signal %d\n", pid, signal);
+		g->stop_reason.thread.pid = pid;
+		g->stop_reason.thread.tid = pid;
+		g->stop_reason.signum = signal;
+		g->stop_reason.is_valid = true;
+		return 0;
+	}
+	if (!isxdigit (g->data[1])) {
+		eprintf ("Message from remote: %s\n", g->data);
+		return -1;
+	}
+	signal = (int) strtol (g->data + 1, NULL, 16);
+	eprintf ("Process %d terminated with signal %d\n", g->pid, signal);
+	g->stop_reason.thread.pid = pid;
+	g->stop_reason.thread.tid = pid;
+	g->stop_reason.signum = signal;
+	g->stop_reason.is_valid = true;
+	// Just to be sure, disconnect
+	return gdbr_disconnect (g);
+}
+
+int handle_stop_reason(libgdbr_t *g) {
+	send_ack (g);
+	if (g->data_len < 3) {
+		return -1;
+	}
+	switch (g->data[0]) {
+	case 'O':
+		unpack_hex (g->data + 1, g->data_len - 1, g->data + 1);
+		//g->data[g->data_len - 1] = '\0';
+		eprintf ("%s", g->data + 1);
+		if (send_ack (g) < 0) {
+			return -1;
+		}
+		return handle_stop_reason (g); // Wait for next stop message
+	case 'W':
+		return stop_reason_exit (g);
+	case 'X':
+		return stop_reason_terminated (g);
+	}
+	if (g->data[0] != 'T') {
+		return -1;
+	}
+	char *ptr1, *ptr2;
+	g->data[g->data_len] = '\0';
+	free (g->stop_reason.exec.path);
+	memset (&g->stop_reason, 0, sizeof (libgdbr_stop_reason_t));
+	g->stop_reason.core = -1;
+	if (sscanf (g->data + 1, "%02x", &g->stop_reason.signum) != 1) {
+		return -1;
+	}
+	g->stop_reason.is_valid = true;
+	g->stop_reason.reason = R_DEBUG_REASON_SIGNAL;
+	for (ptr1 = strtok (g->data + 3, ";"); ptr1; ptr1 = strtok (NULL, ";")) {
+		if (r_str_startswith (ptr1, "thread") && !g->stop_reason.thread.present) {
+			if (!(ptr2 = strchr (ptr1, ':'))) {
+				continue;
+			}
+			ptr2++;
+			if (read_thread_id (ptr2, &g->stop_reason.thread.pid,
+					    &g->stop_reason.thread.tid,
+					    g->stub_features.multiprocess) < 0) {
+				continue;
+			}
+			g->stop_reason.thread.present = true;
+			continue;
+		}
+		if (r_str_startswith (ptr1, "core")) {
+			if (!(ptr2 = strchr (ptr1, ':'))) {
+				continue;
+			}
+			ptr2++;
+			if (!isxdigit (*ptr2)) {
+				continue;
+			}
+			g->stop_reason.core = (int) strtol (ptr2, NULL, 16);
+			continue;
+		}
+		if (g->stop_reason.signum == 5) {
+			if (r_str_startswith (ptr1, "watch")
+			    || r_str_startswith (ptr1, "rwatch")
+			    || r_str_startswith (ptr1, "awatch")) {
+				if (!(ptr2 = strchr (ptr1, ':'))) {
+					continue;
+				}
+				ptr2++;
+				if (!isxdigit (*ptr2)) {
+					continue;
+				}
+				g->stop_reason.watchpoint.addr = strtoll (ptr2, NULL, 16);
+				g->stop_reason.watchpoint.present = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "exec") && !g->stop_reason.exec.present) {
+				if (!(ptr2 = strchr (ptr1, ':'))) {
+					continue;
+				}
+				ptr2++;
+				if (!(g->stop_reason.exec.path = calloc (strlen (ptr1) / 2, 1))) {
+					continue;
+				}
+				unpack_hex (ptr2, strlen (ptr2), g->stop_reason.exec.path);
+				g->stop_reason.exec.present = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "fork") && !g->stop_reason.fork.present) {
+				if (!(ptr2 = strchr (ptr1, ':'))) {
+					continue;
+				}
+				ptr2++;
+				if (read_thread_id (ptr2, &g->stop_reason.fork.pid,
+						    &g->stop_reason.fork.tid,
+						    g->stub_features.multiprocess) < 0) {
+					continue;
+				}
+				g->stop_reason.fork.present = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "vfork") && !g->stop_reason.vfork.present) {
+				if (!(ptr2 = strchr (ptr1, ':'))) {
+					continue;
+				}
+				ptr2++;
+				if (read_thread_id (ptr2, &g->stop_reason.vfork.pid,
+						    &g->stop_reason.vfork.tid,
+						    g->stub_features.multiprocess) < 0) {
+					continue;
+				}
+				g->stop_reason.vfork.present = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "vforkdone")) {
+				g->stop_reason.vforkdone = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "library")) {
+				g->stop_reason.library = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "swbreak")) {
+				g->stop_reason.swbreak = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "hwbreak")) {
+				g->stop_reason.hwbreak = true;
+				continue;
+			}
+			if (r_str_startswith (ptr1, "create")) {
+				g->stop_reason.create = true;
+				continue;
+			}
+		}
+	}
+	if (g->stop_reason.signum == 5) {
+		g->stop_reason.reason = R_DEBUG_REASON_BREAKPOINT;
+	}
+	return 0;
+}
+
+int handle_cont(libgdbr_t *g) {
+	return handle_stop_reason (g);
+}
+
+int handle_lldb_read_reg(libgdbr_t *g) {
+	if (send_ack (g) < 0) {
+		return -1;
+	}
+	char *ptr, *ptr2, *buf;
+	size_t regnum, tot_regs, buflen = 0;
+
+	// Get maximum register number
+	for (regnum = 0; *g->registers[regnum].name; regnum++) {
+		if (g->registers[regnum].offset + g->registers[regnum].size > buflen) {
+			buflen = g->registers[regnum].offset + g->registers[regnum].size;
+		}
+	}
+	tot_regs = regnum;
+
+	// We're not using the receive buffer till next packet anyway. Better use it
+	buf = g->read_buff;
+	memset (buf, 0, buflen);
+
+	if (!(ptr = strtok (g->data, ";"))) {
+		return -1;
+	}
+	while (ptr) {
+		if (!isxdigit (*ptr)) {
+			// This is not a reg value. Skip
+			ptr = strtok (NULL, ";");
+			continue;
+		}
+		// Get register number
+		regnum = (int) strtoul (ptr, NULL, 16);
+		if (regnum >= tot_regs || !(ptr2 = strchr (ptr, ':'))) {
+			ptr = strtok (NULL, ";");
+			continue;
+		}
+		ptr2++;
+		// Write to offset
+		unpack_hex (ptr2, strlen (ptr2), buf + g->registers[regnum].offset);
+		ptr = strtok (NULL, ";");
+		continue;
+	}
+	memcpy (g->data, buf, buflen);
+	g->data_len = buflen;
+	return 0;
 }

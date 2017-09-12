@@ -1,9 +1,10 @@
 -include config-user.mk
 include global.mk
 
-PREVIOUS_RELEASE=1.5.0
+PREVIOUS_RELEASE=1.6.0
 
 MESON?=meson
+PYTHON?=python
 R2R=radare2-regressions
 R2R_URL=$(shell doc/repo REGRESSIONS)
 R2BINS=$(shell cd binr ; echo r*2 r2agent r2pm r2-indent)
@@ -57,6 +58,7 @@ all: plugins.cfg libr/include/r_version.h
 #.PHONY: libr/include/r_version.h
 GIT_TAP=$(shell git describe --tags --match "[0-9]*" 2>/dev/null || echo $(VERSION))
 GIT_TIP=$(shell git rev-parse HEAD 2>/dev/null || echo HEAD)
+R2_VER=$(shell grep VERSION configure.acr | head -n1 | awk '{print $$2}')
 ifndef SOURCE_DATE_EPOCH
 GIT_NOW=$(shell date +%Y-%m-%d)
 else
@@ -68,6 +70,7 @@ libr/include/r_version.h:
 	@echo $(Q)#ifndef R_VERSION_H$(Q) > $@.tmp
 	@echo $(Q)#define R_VERSION_H 1$(Q) >> $@.tmp
 	@echo $(Q)#define R2_VERSION_COMMIT $(R2VC)$(Q) >> $@.tmp
+	@echo $(Q)#define R2_VERSION $(ESC)"$(R2_VER)$(ESC)"$(Q) >> $@.tmp
 	@echo $(Q)#define R2_GITTAP $(ESC)"$(GIT_TAP)$(ESC)"$(Q) >> $@.tmp
 	@echo $(Q)#define R2_GITTIP $(ESC)"$(GIT_TIP)$(ESC)"$(Q) >> $@.tmp
 	@echo $(Q)#define R2_BIRTH $(ESC)"$(GIT_NOW)$(BUILDSEC)$(ESC)"$(Q) >> $@.tmp
@@ -189,7 +192,9 @@ install-man-symlink:
 
 install-doc:
 	${INSTALL_DIR} "${DESTDIR}${DOCDIR}"
-	for FILE in doc/* ; do ${INSTALL_DATA} $$FILE "${DESTDIR}${DOCDIR}" ; done
+	for FILE in doc/* ; do \
+		[ -f $$FILE ] && ${INSTALL_DATA} $$FILE "${DESTDIR}${DOCDIR}" || true ; \
+	done
 
 install-doc-symlink:
 	${INSTALL_DIR} "${DESTDIR}${DOCDIR}"
@@ -241,16 +246,17 @@ install-pkgconfig-symlink:
 	cd pkgcfg ; for FILE in *.pc ; do \
 		ln -fs "$${PWD}/$$FILE" "${DESTDIR}${LIBDIR}/pkgconfig/$$FILE" ; done
 
-
-symstall install-symlink: install-man-symlink install-doc-symlink install-pkgconfig-symlink symstall-www
-	cd libr && ${MAKE} install-symlink
-	cd binr && ${MAKE} install-symlink
-	cd shlr && ${MAKE} install-symlink
+symstall-sdb:
 	for DIR in ${DATADIRS} ; do (\
 		cd "$$DIR" ; \
 		echo "$$DIR" ; \
 		${MAKE} install-symlink ); \
 	done
+
+symstall install-symlink: install-man-symlink install-doc-symlink install-pkgconfig-symlink symstall-www symstall-sdb
+	cd libr && ${MAKE} install-symlink
+	cd binr && ${MAKE} install-symlink
+	cd shlr && ${MAKE} install-symlink
 	mkdir -p "${DESTDIR}${BINDIR}"
 	ln -fs "${PWD}/sys/indent.sh" "${DESTDIR}${BINDIR}/r2-indent"
 	ln -fs "${PWD}/sys/r2-docker.sh" "${DESTDIR}${BINDIR}/r2-docker"
@@ -393,19 +399,17 @@ pie:
 build:
 	$(MESON) --prefix="${PREFIX}" build
 
-meson-windows:
-	cp -f libr/config.mk.meson libr/config.mk
-	cp -f libr/config.h.meson libr/config.h
-
 meson-config meson-cfg meson-conf:
 	# TODO: this is wrong for each platform different plugins must be compiled
 	#cp -f plugins.meson.cfg plugins.cfg
 	#./configure --prefix="${PREFIX}"
-	$(MAKE) libr/include/r_version.h
-	cp -f shlr/spp/config.def.h shlr/spp/config.h
+	echo TODO
 
 meson: build
+	@echo "[ SDB Build ]"
+	$(PYTHON) sys/meson_sdb.py
 	cmp plugins.meson.cfg plugins.cfg || $(MAKE) meson-config
+	@echo "[ Ninja Build ]"
 	ninja -C build
 
 meson-install:
@@ -414,7 +418,7 @@ meson-install:
 B=$(DESTDIR)$(BINDIR)
 L=$(DESTDIR)$(LIBDIR)
 
-meson-symstall:
+meson-symstall: symstall-sdb
 	ln -fs $(PWD)/binr/r2pm/r2pm  ${B}/r2pm
 	ln -fs $(PWD)/build/binr/rasm2/rasm2 ${B}/rasm2
 	ln -fs $(PWD)/build/binr/rarun2/rarun2 ${B}/rarun2
@@ -442,7 +446,6 @@ meson-symstall:
 	ln -fs $(PWD)/build/libr/fs/libr_fs.$(EXT_SO) ${L}/libr_fs.$(EXT_SO)
 	ln -fs $(PWD)/build/libr/debug/libr_debug.$(EXT_SO) ${L}/libr_debug.$(EXT_SO)
 	ln -fs $(PWD)/build/libr/core/libr_core.$(EXT_SO) ${L}/libr_core.$(EXT_SO)
-	# TODO: missing libr/*/d .. no sdb binary is compiled to precompile those files
 
 meson-uninstall:
 	$(MAKE) uninstall

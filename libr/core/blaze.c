@@ -216,7 +216,7 @@ R_API bool core_anal_bbs(RCore *core, const char* input) {
 	Sdb *sdb = NULL;
 	ut64 cur = 0;
 	ut64 start = core->offset;
-	ut64 size = r_num_math (core->num, input + 1);
+	ut64 size = input[0] ? r_num_math (core->num, input + 1) : core->blocksize;
 	ut64 b_start = start;
 	RAnalOp *op;
 	RListIter *iter;
@@ -232,6 +232,9 @@ R_API bool core_anal_bbs(RCore *core, const char* input) {
 	}
 
 	while (cur < size) {
+		if (r_cons_is_breaked ()) {
+			break;
+		}
 		// magic number to fix huge section of invalid code fuzz files
 		if (block_score < invalid_instruction_barrier) {
 			break;
@@ -320,6 +323,9 @@ R_API bool core_anal_bbs(RCore *core, const char* input) {
 			eprintf ("Failed to get next block from list\n");
 			continue;
 		}
+		if (r_cons_is_breaked ()) {
+			break;
+		}
 
 		if (block_list->length > 0) {
 			bb_t *next_block = (bb_t*) r_list_iter_get_data (block_list->tail);
@@ -375,6 +381,9 @@ R_API bool core_anal_bbs(RCore *core, const char* input) {
 	// we simply assume that non reached blocks or called blocks
 	// are functions
 	r_list_foreach (result, iter, block) {
+		if (r_cons_is_breaked ()) {
+			break;
+		}
 		if (block && (block->reached == 0 || block->called >= 1)) {
 			fcn_t* current_function = fcnNew (block);
 			RStack *stack = r_stack_new (100);

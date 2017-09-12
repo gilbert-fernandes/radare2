@@ -3,6 +3,7 @@
 
 // defines like IS_DIGIT, etc'
 #include "r_util/r_str_util.h"
+#include "r_userconf.h"
 
 // TODO: fix this to make it crosscompile-friendly: R_SYS_OSTYPE ?
 /* operating system */
@@ -42,10 +43,16 @@
 #define LIBC_HAVE_SYSTEM 1
 #endif
 
-#if APPLE_SDK_APPLETVOS || APPLE_SDK_WATCHOS || APPLE_SDK_APPLETVSIMULATOR || APPLE_SDK_WATCHSIMULATOR
-#define LIBC_HAVE_FORK 0
+#if APPLE_SDK_IPHONEOS || APPLE_SDK_APPLETVOS || APPLE_SDK_WATCHOS || APPLE_SDK_APPLETVSIMULATOR || APPLE_SDK_WATCHSIMULATOR
+#define LIBC_HAVE_PTRACE 0
 #else
+#define LIBC_HAVE_PTRACE 1
+#endif
+
+#if HAVE_FORK
 #define LIBC_HAVE_FORK 1
+#else
+#define LIBC_HAVE_FORK 0
 #endif
 
 #if defined(__OpenBSD__)
@@ -82,8 +89,6 @@
 #endif
 
 #ifdef _MSC_VER
-  /* Useful for windows _CONTEXT structure declaration */
-  #define _X86_
   #define strcasecmp stricmp
   #define strncasecmp strnicmp
   #define __WINDOWS__ 1
@@ -104,7 +109,7 @@
   #define WIN32_LEAN_AND_MEAN
   #else
   /* Deprecated */
-  #include <winsock.h>
+  //#include <winsock.h>
   #endif
   typedef int socklen_t;
   #undef USE_SOCKETS
@@ -240,7 +245,7 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #endif
 
 #define R_LIB_VERSION_HEADER(x) \
-R_API const char *x##_version()
+R_API const char *x##_version(void)
 #define R_LIB_VERSION(x) \
 R_API const char *x##_version () { return "" R2_GITTAP; }
 
@@ -251,6 +256,7 @@ R_API const char *x##_version () { return "" R2_GITTAP; }
 #define R_NEW0(x) (x*)calloc(1,sizeof(x))
 #define R_NEW(x) (x*)malloc(sizeof(x))
 #define R_NEWCOPY(x,y) (x*)r_new_copy(sizeof(x), y)
+
 static inline void *r_new_copy(int size, void *data) {
 	void *a = malloc(size);
 	if (a) {
@@ -297,9 +303,7 @@ static inline void *r_new_copy(int size, void *data) {
 #define perror(x) _perror(x,__FILE__,__LINE__,__func__)
 #define r_sys_perror(x) _perror(x,__FILE__,__LINE__,__func__)
 #else
-
-#define r_sys_perror(x) perror(x);
-
+#define r_sys_perror(x) r_sys_perror_str(x);
 #endif
 
 #if __UNIX__
@@ -321,6 +325,7 @@ static inline void *r_new_copy(int size, void *data) {
 #define typeof(arg) __typeof__(arg)
 #endif
 
+#undef r_offsetof
 #define r_offsetof(type, member) ((unsigned long) &((type*)0)->member)
 
 #define R_BETWEEN(x,y,z) (((y)>=(x)) && ((y)<=(z)))
@@ -507,11 +512,75 @@ enum {
 #define R_SYS_OS "unknown"
 #endif
 
+#if __GNUC__
+#  define r_sys_trap() __builtin_trap()
+#else
+#  if __i386__ || __x86_64__
+#    define r_sys_trap() __asm__ __volatile__ ("int3")
+#  elif __arm__
+#    define r_sys_trap() __asm__ __volatile__ ("bkpt")
+#  elif __arm64__
+#    define r_sys_trap() __asm__ __volatile__ ("brk #1")
+#  else
+#    define r_sys_trap() __asm__ __volatile__ (".word 0");
+#  endif
+#endif
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+static inline void r_run_call1 (void *fcn, void *arg1) {
+	((void (*)(void *))(fcn))(arg1);
+}
+
+static inline void r_run_call2 (void *fcn, void *arg1, void *arg2) {
+	((void (*)(void *, void *))(fcn))(arg1, arg2);
+}
+
+static inline void r_run_call3 (void *fcn, void *arg1, void *arg2, void *arg3) {
+	((void (*)(void *, void *, void *))(fcn))(arg1, arg2, arg3);
+}
+
+static inline void r_run_call4 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4) {
+	((void (*)(void *, void *, void *, void *))(fcn))(arg1, arg2, arg3, arg4);
+}
+
+static inline void r_run_call5 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5) {
+	((void (*)(void *, void *, void *, void *, void *))(fcn))(arg1, arg2, arg3, arg4, arg5);
+}
+
+static inline void r_run_call6 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5,
+	void *arg6) {
+	((void (*)(void *, void *, void *, void *, void *, void *))(fcn))
+		(arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+static inline void r_run_call7 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5,
+	void *arg6, void *arg7) {
+	((void (*)(void *, void *, void *, void *, void *, void *, void *))(fcn))
+		(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+static inline void r_run_call8 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5,
+	void *arg6, void *arg7, void *arg8) {
+	((void (*)(void *, void *, void *, void *, void *, void *, void *, void *))(fcn))
+		(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+static inline void r_run_call9 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5,
+	void *arg6, void *arg7, void *arg8, void *arg9) {
+	((void (*)(void *, void *, void *, void *, void *, void *, void *, void *, void *))(fcn))
+		(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+}
+
+static inline void r_run_call10 (void *fcn, void *arg1, void *arg2, void *arg3, void *arg4, void *arg5,
+	void *arg6, void *arg7, void *arg8, void *arg9, void *arg10) {
+	((void (*)(void *, void *, void *, void *, void *, void *, void *, void *, void *, void *))(fcn))
+		(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+}
+
+#endif // R2_TYPES_H
 
 // Usage: R_DEFINE_OBJECT(r_asm);
 #if 0
@@ -523,4 +592,3 @@ enum {
     return (type##_deinit(foo), free(foo), NULL); \
  }
 #endif
-

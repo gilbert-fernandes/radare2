@@ -18,7 +18,8 @@
 
    You should have received a copy of the GNU General Public License
    along with GAS or GDB; see the file COPYING.	If not, write to
-   the Free Software Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA
+*/
 
 #ifndef OPCODES_HEXAGON_H
 #define OPCODES_HEXAGON_H 1
@@ -71,7 +72,7 @@
 #define HEXAGON_IS16INSN(num) 0	/* not yet implemented */
 
 /* Extract the low 16 bits */
-#define HEXAGON_LO16(num) ((num) & ~(-1 << 16))
+#define HEXAGON_LO16(num) ((num) & ~(-1UL << 16))
 
 /* Extract the high 16 bits */
 #define HEXAGON_HI16(num) (HEXAGON_LO16 ((num) >> 16))

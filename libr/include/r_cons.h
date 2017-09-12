@@ -190,6 +190,7 @@ typedef struct r_cons_palette_t {
 	char *gui_background;
 	char *gui_alt_background;
 	char *gui_border;
+	char *highlight;
 
 	/* graph colors */
 	char *graph_box;
@@ -208,8 +209,8 @@ typedef struct r_cons_palette_t {
 	int rainbow_sz; // size of rainbow
 } RConsPalette;
 
-R_API const char *r_cons_rainbow_get(int idx, int last, bool bg);
-R_API void r_cons_rainbow_free();
+R_API char *r_cons_rainbow_get(int idx, int last, bool bg);
+R_API void r_cons_rainbow_free(void);
 R_API void r_cons_rainbow_new(int sz);
 
 typedef void (*RConsEvent)(void *);
@@ -298,6 +299,7 @@ typedef struct r_cons_t {
 	int fix_rows;
 	int fix_columns;
 	bool breaked;
+	bool break_lines;
 	int noflush;
 	FILE *fdin; // FILE? and then int ??
 	int fdout; // only used in pipe.c :?? remove?
@@ -343,6 +345,9 @@ typedef struct r_cons_t {
 	int break_word_len;
 	ut64 timeout;
 	bool use_color;
+	bool use_tts;
+	bool filter;
+	char* (*rgbstr)(char *str, ut64 addr);
 } RCons;
 
 // XXX THIS MUST BE A SINGLETON AND WRAPPED INTO RCons */
@@ -376,6 +381,8 @@ typedef struct r_cons_t {
 #define Color_INVERT_RESET "\x1b[27m"
 /* plain colors */
 #define Color_RESET      "\x1b[0m"
+#define Color_NOBGRESET  "\x1b[22;24;25;27;28;39m"
+#define Color_BGRESET    "\x1b[49m"
 #define Color_BLACK      "\x1b[30m"
 #define Color_BGBLACK    "\x1b[40m"
 #define Color_RED        "\x1b[31m"
@@ -559,6 +566,7 @@ R_API void r_cons_memset(char ch, int len);
 R_API void r_cons_visual_flush(void);
 R_API void r_cons_visual_write(char *buffer);
 R_API int r_cons_is_utf8(void);
+R_API void r_cons_cmd_help(const char * help[], bool use_color);
 
 /* input */
 //R_API int  r_cons_fgets(char *buf, int len, int argc, const char **argv);
@@ -569,7 +577,7 @@ R_API int r_cons_eof(void);
 
 R_API int r_cons_palette_init(const unsigned char *pal);
 R_API int r_cons_pal_set(const char *key, const char *val);
-R_API void r_cons_pal_update_event();
+R_API void r_cons_pal_update_event(void);
 R_API void r_cons_pal_free(void);
 R_API void r_cons_pal_init(const char *foo);
 R_API char *r_cons_pal_parse(const char *str);
@@ -586,6 +594,7 @@ R_API bool r_cons_isatty(void);
 R_API int r_cons_get_cursor(int *rows);
 R_API int r_cons_arrow_to_hjkl(int ch);
 R_API int r_cons_html_print(const char *ptr);
+R_API char *r_cons_html_filter(const char *ptr, int *newlen);
 
 // TODO: use gets() .. MUST BE DEPRECATED
 R_API int r_cons_fgets(char *buf, int len, int argc, const char **argv);
@@ -604,6 +613,7 @@ R_API void r_cons_rgb(ut8 r, ut8 g, ut8 b, int is_bg);
 R_API void r_cons_rgb_fgbg(ut8 r, ut8 g, ut8 b, ut8 R, ut8 G, ut8 B);
 R_API void r_cons_rgb_init(void);
 R_API char *r_cons_rgb_str(char *outstr, ut8 r, ut8 g, ut8 b, int is_bg);
+R_API char *r_cons_rgb_str_off(char *outstr, ut64 off);
 R_API void r_cons_color(int fg, int r, int g, int b);
 R_API char *r_cons_color_random(int bg);
 R_API char *r_cons_color_random_string(int bg);

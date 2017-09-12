@@ -834,17 +834,13 @@ static void anop_esil (RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 		}
 		break;
 	case X86_INS_CBW:
+		esilprintf (op, "al,ax,=,7,ax,>>,?{,0xff00,ax,|=,}");
+		break;
 	case X86_INS_CWDE:
+		esilprintf (op, "ax,eax,=,15,eax,>>,?{,0xffff0000,eax,|=,}");
+		break;
 	case X86_INS_CDQE:
-		{
-			if (a->bits == 64) {
-				esilprintf (op, "32,eax,>>,eax,rax,=,$c,?{,0xffffffff00000000,rax,|=}");
-			} else if (a->bits == 32) {
-				esilprintf (op, "16,ax,>>,ax,eax,=,$c,?{,0xffff0000,eax,|=}");
-			} else {
-				esilprintf (op, "8,al,>>,al,ax,=,$c,?{,0xff00,ax,|=}");
-			}
-		}
+		esilprintf (op, "eax,rax,=,31,rax,>>,?{,0xffffffff00000000,rax,|=,}");
 		break;
 	case X86_INS_CMP:
 	case X86_INS_CMPPD:
@@ -1625,6 +1621,7 @@ static void anop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh 
 		.bits = a->bits
 	};
 	int regsz = 4;
+	static RRegItem regs[2];
 	switch (a->bits) {
 	case 64: regsz = 8; break;
 	case 16: regsz = 2; break;
@@ -1845,14 +1842,16 @@ static void anop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh 
 		op->ptr = UT64_MAX;
 
 		op->src[0] = r_anal_value_new ();
-		op->src[0]->reg = R_NEW0 (RRegItem);
+		ZERO_FILL (regs[1]);
+		op->src[0]->reg = &regs[1];
 		op->dst = r_anal_value_new ();
 
 		parse_reg_name_mov (op->src[0]->reg, &gop.handle, insn, 1);
 
 		switch (INSOP(0).type) {
 		case X86_OP_MEM:
-			op->dst->reg = R_NEW0 (RRegItem);
+			ZERO_FILL (regs[1]);
+			op->dst->reg = &regs[0];
 			parse_reg_name_mov (op->dst->reg, &gop.handle, insn, 0);
 
 			op->cycles = CYCLE_MEM;
@@ -1999,9 +1998,11 @@ static void anop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh 
 	case X86_INS_LEA:
 		op->type = R_ANAL_OP_TYPE_LEA;
 		op->src[0] = r_anal_value_new ();
-		op->src[0]->reg = R_NEW0 (RRegItem);
+		ZERO_FILL (regs[1]);
+		op->src[0]->reg = &regs[1];
 		op->dst = r_anal_value_new ();
-		op->dst->reg = R_NEW0 (RRegItem);
+		ZERO_FILL (regs[0]);
+		op->dst->reg = &regs[0];
 
 		parse_reg_name_lea (op->src[0]->reg, &gop.handle, insn, 1);
 		parse_reg_name_mov (op->dst->reg, &gop.handle, insn, 0);
@@ -2055,7 +2056,6 @@ static void anop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh 
 			break;
 		default:
 			op->type = R_ANAL_OP_TYPE_UPUSH;
-			op->cycles = 1;
 			op->cycles = CYCLE_MEM + CYCLE_MEM;
 			break;
 		}
@@ -2641,7 +2641,7 @@ static char *get_reg_profile(RAnal *anal) {
 		"=A3	dx\n"
 		"=A4	si\n"
 		"=A5	di\n"
-		"=SN	ax\n"
+		"=SN	ah\n"
 		"gpr	ip	.16	48	0\n"
 		"gpr	ax	.16	24	0\n"
 		"gpr	ah	.8	25	0\n"

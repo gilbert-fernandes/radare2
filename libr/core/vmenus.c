@@ -73,9 +73,9 @@ static char *colorize_asm_string(RCore *core, const char *buf_asm, int optype) {
 	if (spacer) {
 		char *scol1, *s1 = r_str_ndup (source, spacer - source);
 		char *scol2, *s2 = strdup (spacer + 2);
-		scol1 = r_print_colorize_opcode (core->print, s1, color_reg, color_num);
+		scol1 = r_print_colorize_opcode (core->print, s1, color_reg, color_num, false);
 		free (s1);
-		scol2 = r_print_colorize_opcode (core->print, s2, color_reg, color_num);
+		scol2 = r_print_colorize_opcode (core->print, s2, color_reg, color_num, false);
 		free (s2);
 		if (!scol1) {
 			scol1 = strdup ("");
@@ -91,7 +91,7 @@ static char *colorize_asm_string(RCore *core, const char *buf_asm, int optype) {
 	}
 	char *res = strdup("");
 	res = r_str_append (res, r_print_color_op_type (core->print, optype));
-	tmp = r_print_colorize_opcode (core->print, source, color_reg, color_num);
+	tmp = r_print_colorize_opcode (core->print, source, color_reg, color_num, false);
 	res = r_str_append (res, tmp);
 	free (tmp);
 	return res;
@@ -983,7 +983,7 @@ static void *show_class(RCore *core, int mode, int idx, RBinClass *_c, const cha
 				}
 			}
 
-			mflags = r_core_bin_method_flags_str (m, 0);
+			mflags = r_core_bin_method_flags_str (m->method_flags, 0);
 
 			if (show_color) {
 				if (i == idx) {
@@ -1047,6 +1047,7 @@ R_API int r_core_visual_classes(RCore *core) {
 		r_cons_visual_flush ();
 		ch = r_cons_readchar ();
 		if (ch==-1 || ch==4) {
+			R_FREE (grep);
 			return false;
 		}
 
@@ -2704,9 +2705,6 @@ repeat:
 	case 'x':
 		r_core_cmd0 (core, "./r");
 		break;
-	case 'B':
-		define_data_ntimes (core, off, rep, R_WORD_DATA);
-		break;
 	case 'i':
 		{
 			char str[128];
@@ -2718,7 +2716,28 @@ repeat:
 		}
 		break;
 	case 'b':
+		if (plen != core->blocksize) {
+			rep = plen / 2;
+		}
 		define_data_ntimes (core, off, rep, R_BYTE_DATA);
+		break;
+	case 'B':
+		if (plen != core->blocksize) {
+			rep = plen;
+		}
+		define_data_ntimes (core, off, rep, R_WORD_DATA);
+		break;
+	case 'w':
+		if (plen != core->blocksize) {
+			rep = plen / 4;
+		}
+		define_data_ntimes (core, off, rep, R_DWORD_DATA);
+		break;
+	case 'W':
+		if (plen != core->blocksize) {
+			rep = plen / 8;
+		}
+		define_data_ntimes (core, off, rep, R_QWORD_DATA);
 		break;
 	case 'm':
 		{
@@ -2850,12 +2869,6 @@ repeat:
 				r_cons_any_key (NULL);
 			}
 		}
-		break;
-	case 'w':
-		define_data_ntimes (core, off, rep, R_DWORD_DATA);
-		break;
-	case 'W':
-		define_data_ntimes (core, off, rep, R_QWORD_DATA);
 		break;
 	case 'e':
 		// set function size
@@ -3062,7 +3075,10 @@ R_API void r_core_visual_colors(RCore *core) {
 			"# Press 'rRgGbB', 'jk' or 'q'\nec %s %s   # %d (%s)\n",
 			opt, k, color, atoi (cstr+7), cstr+1);
 		r_core_cmdf (core, "ec %s %s", k, color);
-		r_core_cmd0 (core, "pd $r-8");
+		char * res = r_core_cmd_str (core, "pd $r");
+		int h, w = r_cons_get_size (&h);
+		char *body = r_str_ansi_crop (res, 0, 0, w, h - 4);
+		r_cons_printf("%s", body);
 		r_cons_flush ();
 		ch = r_cons_readchar ();
 		ch = r_cons_arrow_to_hjkl (ch);

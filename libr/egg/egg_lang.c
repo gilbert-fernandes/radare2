@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2010-2015 - pancake */
+/* radare - LGPL - Copyright 2010-2017 - pancake */
 
 #include <r_egg.h>
 
@@ -309,6 +309,9 @@ static void rcc_internal_mathop(REgg *egg, char *ptr, char *ep, char op) {
 	if (*p) {
 		e->mathop (egg, op, varsize, type, p, ep);
 	}
+	if (p != oldp) {
+		R_FREE (p);
+	}
 	R_FREE (oldp);
 	R_FREE (ep);
 }
@@ -321,23 +324,22 @@ static void rcc_internal_mathop(REgg *egg, char *ptr, char *ep, char op) {
 static void rcc_mathop(REgg *egg, char **pos, int level) {
 	REggEmit *e = egg->remit;
 	int op_ret = level;
-	char op, *next_pos, *p;
+	char op, *next_pos;
 
 	while (**pos && is_space (**pos)) (*pos)++;
 	next_pos = *pos + 1;
 
 	do {
 		op = (is_op (**pos) && !(is_var (*pos)))? **pos: '=';
-		p = (is_op (**pos) && !(is_var (*pos)))? *pos + 1: *pos;
+		*pos = (is_op (**pos) && !(is_var (*pos)))? *pos + 1: *pos;
 		op_ret = get_op (&next_pos);
 		if (op_ret > level) {
-			(*pos)++;
 			rcc_mathop (egg, pos, op_ret);
-			rcc_internal_mathop (egg, strdup (e->regs (egg, op_ret - 1))
+			rcc_internal_mathop (egg, e->regs (egg, op_ret - 1) 
 				, strdup (e->regs (egg, level - 1)), op);
 			next_pos = *pos + 1;
 		} else {
-			rcc_internal_mathop (egg, p, strdup (e->regs (egg, level - 1)), op);
+			rcc_internal_mathop (egg, *pos, strdup (e->regs (egg, level - 1)), op);
 			*pos = next_pos;
 			next_pos++;
 		}
@@ -1179,10 +1181,14 @@ static void rcc_next(REgg *egg) {
 				rcc_mathop (egg, &tmp, 2);
 				R_FREE (mathline);
 				tmp = NULL;
-				// following code block is too ugly, oh no
+				// following code block is too ugly, oh noes
 				p = r_egg_mkvar (egg, buf, ptr, 0);
 				if (is_var (p)) {
-					p = r_egg_mkvar (egg, buf, p, 0);
+					char *q = r_egg_mkvar (egg, buf, p, 0);
+					if (q) {
+						free (p);
+						p = q;
+					}
 					if (varxs == '*' || varxs == '&') {
 						eprintf ("not support for *ptr in dstvar\n");
 					}
@@ -1336,7 +1342,7 @@ R_API int r_egg_lang_parsechar(REgg *egg, char c) {
 					elem_n = 0;
 					R_FREE (ifelse_table[CTX][nestedi[CTX] - 1])
 					ifelse_table[CTX][nestedi[CTX] - 1] =
-						r_str_newf ("  __end_%d_%d_%d:",
+						r_str_newf ("  __end_%d_%d_%d",
 							nfunctions, CTX, nestedi[CTX]);
 				}
 				r_egg_printf (egg, "  __begin_%d_%d_%d:\n",

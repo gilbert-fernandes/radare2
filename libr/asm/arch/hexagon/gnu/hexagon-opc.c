@@ -15,7 +15,8 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
-   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335 USA.
+*/
 
 #include <assert.h>
 #include <limits.h>
@@ -1158,8 +1159,8 @@ hexagon_extend
   if (hexagon_if_arch_kext ())
     {
       /* TODO: It would be better to use the insn table to figure out the number of bits. */
-      xvalue = *value &  (~0L << 6);
-      *value = *value & ~(~0L << 6);
+      xvalue = *value &  ((~0UL >> 6) << 6);
+      *value = *value & ~((~0UL >> 6) << 6);
 
       /*
       if (is_signed && *value > (1L << (bits - 1)))
@@ -1336,7 +1337,7 @@ hexagon_hash_icode
 /* Configuration flags.  */
 
 /* Various HEXAGON_HAVE_XXX bits.  */
-#define HEXAGON_CPU_TYPE_UNINIT (~0 << sizeof (cpu_type))
+#define HEXAGON_CPU_TYPE_UNINIT (~0UL << sizeof (cpu_type))
 static int cpu_type;
 static int cpu_flag;
 
@@ -1397,6 +1398,7 @@ int
 hexagon_get_opcode_mach
 (int bfd_mach, int big_p)
 {
+#if 0
   static int mach_type_map [] =
   {
     HEXAGON_MACH_V2,
@@ -1405,6 +1407,7 @@ hexagon_get_opcode_mach
     HEXAGON_MACH_V5,
     /* Leaving space for future cores */
   };
+#endif
 // v6 not supported :(
 // XXX hardcoded to v5
 return HEXAGON_MACH_V5;
@@ -1697,9 +1700,9 @@ hexagon_encode_operand
     }
 
   if (operand->flags & HEXAGON_OPERAND_IS_LO16)
-    value.s = HEXAGON_LO16 (value.s);
+    value.s = HEXAGON_LO16 (value.u);
   else if (operand->flags & HEXAGON_OPERAND_IS_HI16)
-    value.s = HEXAGON_HI16 (value.s);
+    value.s = HEXAGON_HI16 (value.u);
   else if (operand->flags & HEXAGON_OPERAND_IS_SUBSET)
     value.s = HEXAGON_SUBREGS_TO (value.s, operand->flags & HEXAGON_OPERAND_IS_PAIR);
 
@@ -1837,7 +1840,10 @@ hexagon_reg_num
                 continue;
 
               *input = regs + len - (*name? 1: 0);
-              return ((int) (aliasn? *aliasn = i: i), (int) regn);
+	      if (aliasn) {
+		      *aliasn = i;
+	      }
+              return regn;
             }
         }
     }
@@ -2832,14 +2838,14 @@ hexagon_dis_operand
           xed = FALSE;
           value  -= paddr;
           value >>= operand->shift_count;
-          value  &= ~(~0 << 6);
+          value  &= ~(~0UL << 6);
           value  += xvalue + paddr;
         }
       else
         {
           xed = TRUE;
           value >>= operand->shift_count;
-          value  &= ~(~0 << 6);
+          value  &= ~(~0UL << 6);
           value  += xvalue;
         }
       xer = xvalue = 0;

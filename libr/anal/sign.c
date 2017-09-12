@@ -12,7 +12,7 @@ const char *getRealRef(RCore *core, ut64 off) {
 	RFlagItem *item = NULL;
 	RListIter *iter = NULL;
 
-	RList *list = ht_find (core->flags->ht_off, sdb_fmt (2, "flg.%"PFMT64x, off), NULL);
+	const RList *list = r_flag_get_list (core->flags, off);
 	if (!list) {
 		return NULL;
 	}
@@ -285,7 +285,7 @@ static bool addItem(RAnal *a, RSignItem *it) {
 	sdb_set (a->sdb_zigns, key, val, 0);
 
 out:
-	free (curit);
+	r_sign_item_free (curit);
 
 	return retval;
 }
@@ -889,7 +889,7 @@ static int addSearchKwCB(RSignItem *it, void *user) {
 	}
 
 	it2 = r_sign_item_dup (it);
-	r_list_append(ss->items, it2);
+	r_list_append (ss->items, it2);
 
 	// TODO(nibble): change arg data in r_search_keyword_new to void*
 	kw = r_search_keyword_new (bytes->bytes, bytes->size, bytes->mask, bytes->size, (const char *) it2);

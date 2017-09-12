@@ -7,14 +7,6 @@
 #include "8051_ops.h"
 #include "8051_disas.h"
 
-static inline ut16 arg_offset (ut16 pc, ut8 offset) {
-	if (offset < 0x80) {
-		return pc + offset;
-	}
-	offset = 0 - offset;
-	return pc - offset;
-}
-
 int _8051_disas (ut64 pc, RAsmOp *op, const ut8 *buf, ut64 len) {
 	int i = 0;
 	while (_8051_ops[i].string && _8051_ops[i].op != (buf[0] & ~_8051_ops[i].mask)) {
@@ -43,7 +35,7 @@ int _8051_disas (ut64 pc, RAsmOp *op, const ut8 *buf, ut64 len) {
 				if (arg1 == A_OFFSET) {
 					sprintf (op->buf_asm, name, arg_offset (pc + 2, buf[1]));
 				} else if (arg1 == A_ADDR11) {
-					sprintf (op->buf_asm, name, ((buf[0] & 0xe0) << 3) + buf[1]);
+					sprintf (op->buf_asm, name, arg_addr11 (pc + 2, buf));
 				} else if ((arg1 == A_RI) || (arg1 == A_RN)) {
 					// op @Ri, arg; op Rn, arg
 					if (arg2 == A_OFFSET) {
@@ -54,6 +46,9 @@ int _8051_disas (ut64 pc, RAsmOp *op, const ut8 *buf, ut64 len) {
 				} else if ((arg2 == A_RI) || (arg2 == A_RN)) {
 					// op arg, @Ri; op arg, Rn
 					sprintf (op->buf_asm, name, buf[1], buf[0] & mask);
+				} else if (arg1 == A_BIT) {
+					// bit addressing mode
+					sprintf (op->buf_asm, name, arg_bit (buf[1]), buf[1] & 0x07);
 				} else {
 					// direct, immediate, bit
 					sprintf (op->buf_asm, name, buf[1]);
@@ -73,15 +68,21 @@ int _8051_disas (ut64 pc, RAsmOp *op, const ut8 *buf, ut64 len) {
 					if (mask != A_NONE) {
 						// @Ri, immediate, offset; Rn, immediate, offset
 						sprintf (op->buf_asm, name, buf[0] & mask, buf[1], arg_offset (pc + 3, buf[1]));
+					} else if (arg1 == A_BIT) {
+						// bit, offset
+						sprintf (op->buf_asm, name, arg_bit (buf[1]), buf[1] & 0x07, arg_offset (pc + 3, buf[2]));
 					} else {
-						// bit, offset; direct, offset; a, immediate, offset
-						sprintf (op->buf_asm, name, buf[1], arg_offset (pc+3, buf[2]));
+						// direct, offset; a, immediate, offset
+						sprintf (op->buf_asm, name, buf[1], arg_offset (pc + 3, buf[2]));
 					}
 				} else if (arg3 == A_OFFSET) {
 					// @Ri/Rn, direct, offset
 					sprintf (op->buf_asm, name, buf[0] & mask, buf[1], arg_offset (pc + 3, buf[2]));
+				} else if (arg1 == A_DIRECT && arg2 == A_DIRECT) {
+					// op direct, direct has src and dest swapped
+					sprintf (op->buf_asm, name, buf[2], buf[1]);
 				} else {
-					// direct, immediate; direct, direct; immediate, immediate
+					// direct, immediate
 					sprintf (op->buf_asm, name, buf[1], buf[2]);
 				}
 			} else {

@@ -16,6 +16,42 @@ static void libc_printf(const char *format, ...) {
 }
 static bool isInterrupted = false;
 
+R_API void r_print_portionbar(RPrint *p, const ut64 *portions, int n_portions) {
+	const int use_color = p->flags & R_PRINT_FLAGS_COLOR;
+	int i, j;
+	ut64 total = 0LL;
+	for (i = 0; i < n_portions; i++) {
+		ut64 sum = total + portions[i];
+		if (total > sum) {
+			eprintf ("portionbar overflow aborted\n");
+			return;
+		}
+		total = sum;
+	}
+	p->cb_printf ("[");
+	if (total == 0) {
+		total = 1;
+	}
+	for (i = 0; i < n_portions; i++) {
+		int pc = portions[i] * 100 / total;
+		// adjust pc to screen columns
+		pc = pc * p->width / 100;
+		if (use_color) {
+			p->cb_printf ("\x1b[%dm", 31 + (i % 8));
+		}
+		if (pc == 0) {
+			pc = 1;
+		}
+		for (j = 0; j < pc; j++) {
+			p->cb_printf ("%c", 'A'+ i);
+		}
+		if (use_color) {
+			p->cb_printf (Color_RESET);
+		}
+	}
+	p->cb_printf ("]\n");
+}
+
 R_API void r_print_columns (RPrint *p, const ut8 *buf, int len, int height) {
 	int i, j, cols = 78;
 	int rows = height > 0 ? height : 10;
@@ -370,6 +406,13 @@ R_API void r_print_addr(RPrint *p, ut64 addr) {
 		if (use_color) {
 			const char *pre = PREOFF (offset): Color_GREEN;
 			const char *fin = Color_RESET;
+			if (p->flags & R_PRINT_FLAGS_RAINBOW) {
+				// pre = r_cons_rgb_str_off (rgbstr, addr);
+				if (p && p->cons && p->cons->rgbstr) {
+					char rgbstr[32];
+					pre = p->cons->rgbstr (rgbstr, addr);
+				}
+			}
 			if (dec) {
 				printfmt ("%s%s%" PFMT64d "%s%c", pre, white, addr, fin, ch);
 			} else {
@@ -810,7 +853,7 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 				printfmt ("|");
 			}
 			/* print comment header*/
-			if (p->use_comments && !compact) {
+			if (p && p->use_comments && !compact) {
 				if (col != 2) {
 					printfmt (" ");
 				}
@@ -864,7 +907,9 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 							printfmt (j % 2? "   ": "  ");
 						}
 					} else {
-						if (base == 10) {
+						if (base == 32) {
+							printfmt ((j%4)? "   ": "  ");
+						} else if (base == 10) {
 							printfmt (j % 2? "     ": "  ");
 						} else {
 							printfmt (j % 2? "   ": "  ");
@@ -983,7 +1028,7 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 				}
 			}
 		}
-		if (p->use_comments) {
+		if (p && p->use_comments) {
 			for (; j < i + inc; j++) {
 				printfmt (" ");
 			}
@@ -1062,6 +1107,7 @@ R_API void r_print_hexdiff(RPrint *p, ut64 aa, const ut8 *_a, ut64 ba, const ut8
 		return;
 	}
 	if (!((b = M (_b, len)))) {
+		free (a);
 		return;
 	}
 	for (i = 0; i < len; i += 16) {
@@ -1208,8 +1254,11 @@ R_API void r_print_progressbar(RPrint *p, int pc, int _cols) {
 		p = &staticp;
 	}
 	pc = R_MAX (0, R_MIN (100, pc));
-	p->cb_printf ("%4d%% [", pc);
+	if (p->flags & R_PRINT_FLAGS_HEADER) {
+		p->cb_printf ("%4d%% ", pc);
+	}
 	cols -= 15;
+	p->cb_printf ("[");
 	for (i = cols * pc / 100; i; i--) {
 		p->cb_printf ("#");
 	}
@@ -1307,8 +1356,11 @@ R_API void r_print_zoom(RPrint *p, void *user, RPrintZoomCallback cb, ut64 from,
 }
 
 R_API void r_print_fill(RPrint *p, const ut8 *arr, int size, ut64 addr, int step) {
-	const int show_colors = p->flags & R_PRINT_FLAGS_COLOR;
-	const char *firebow[6] = { NULL };
+	if (!p || !arr) {
+		return;
+	}
+	const bool show_colors = (p && (p->flags & R_PRINT_FLAGS_COLOR));
+	char *firebow[6];
 	int i = 0, j;
 
 	for (i = 0; i < 6; i++) {
@@ -1333,7 +1385,19 @@ R_API void r_print_fill(RPrint *p, const ut8 *arr, int size, ut64 addr, int step
 		ut8 next = (i + 1 < size)? arr[i + 1]: 0;
 		int base = 0;
 		if (addr != UT64_MAX && step > 0) {
-			p->cb_printf ("0x%08" PFMT64x " ", addr + (i * step));
+			ut64 at = addr + (i * step);
+			if (p->cur_enabled) {
+				if (i == p->cur) {
+					p->cb_printf (Color_INVERT"> 0x%08" PFMT64x " "Color_RESET, at);
+					if (p->num) {
+						p->num->value = at;
+					}
+				} else {
+					p->cb_printf ("  0x%08" PFMT64x " ", at);
+				}
+			} else {
+				p->cb_printf ("0x%08" PFMT64x " ", at);
+			}
 			p->cb_printf ("%02x %04x |", i, arr[i]);
 		} else {
 			p->cb_printf ("|");
@@ -1375,6 +1439,9 @@ R_API void r_print_fill(RPrint *p, const ut8 *arr, int size, ut64 addr, int step
 			}
 		}
 		p->cb_printf ("\n");
+	}
+	for (i = 0; i < 6; i++) {
+		free (firebow[i]);
 	}
 }
 
@@ -1546,11 +1613,11 @@ static bool issymbol(char c) {
 	}
 }
 
-R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, const char *num) {
+R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, const char *num, bool partial_reset) {
 	int i, j, k, is_mod, is_float = 0, is_arg = 0;
-	ut32 c_reset = strlen (Color_RESET);
+	char *reset = partial_reset ? Color_NOBGRESET:Color_RESET;
+	ut32 c_reset = strlen (reset);
 	int is_jmp = p && (*p == 'j' || ((*p == 'c') && (p[1] == 'a')))? 1: 0;
-	int is_num;
 	ut32 opcode_sz = p && *p? strlen (p) * 10 + 1: 0;
 	char previous = '\0';
 
@@ -1622,8 +1689,8 @@ R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, con
 					eprintf ("r_print_colorize_opcode(): buffer overflow!\n");
 					return strdup (p);
 				}
-				strcpy (o + j, Color_RESET);
-				j += strlen (Color_RESET);
+				strcpy (o + j, reset);
+				j += strlen (reset);
 				o[j] = p[i];
 				if (!(p[i+1] == '$' || ((p[i+1] > '0') && (p[i+1] < '9')))) {
 					ut32 reg_len = strlen (reg);
@@ -1642,7 +1709,6 @@ R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, con
 			// find if next ',' before ' ' is found
 			is_mod = 0;
 			is_float = 0;
-			is_num = 1;
 			for (k = i + 1; p[k]; k++) {
 				if (p[k] == 'e' && p[k + 1] == '+') {
 					is_float = 1;
@@ -1654,9 +1720,6 @@ R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, con
 				if (p[k] == ',') {
 					is_mod = 1;
 					break;
-				}
-				if (!isdigit (p[k])) {
-					is_num = false;
 				}
 			}
 			if (is_float) {
@@ -1681,7 +1744,14 @@ R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, con
 		case '0': /* address */
 			if (p[i + 1] == 'x') {
 				if (print->flags & R_PRINT_FLAGS_SECSUB) {
-					RIOSection *s = print->iob.section_vget (print->iob.io, r_num_get (NULL, p + i));
+					RIOSection *s = NULL;
+					SdbList *secs = print->iob.sections_vget (print->iob.io, r_num_get (NULL, p + i));
+					if (secs) {
+						s = (RIOSection *)ls_pop (secs);
+						secs->free = NULL;
+						ls_free (secs);
+						secs = NULL;
+					}
 					if (s) {
 						if (strlen (s->name) + j + 1 >= COLORIZE_BUFSIZE) {
 							eprintf ("stop before overflow\n");
@@ -1706,7 +1776,7 @@ R_API char* r_print_colorize_opcode(RPrint *print, char *p, const char *reg, con
 		opcode_sz += 21;
 		/* free (t_o); */
 	}
-	strcpy (o + j, Color_RESET);
+	strcpy (o + j, reset);
 	//strcpy (p, o); // may overflow .. but shouldnt because asm.buf_asm is big enought
 	return strdup (o);
 }
