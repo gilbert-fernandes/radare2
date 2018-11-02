@@ -329,7 +329,7 @@ static int mach_write_at(RIO *io, RIODesc *desc, const void *buf, int len, ut64 
 	}
 	operms = tsk_getperm (io, task, pageaddr);
 	if (!tsk_setperm (io, task, pageaddr, total_size, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)) {
-		eprintf ("io.mach: Cannot set page perms for %d bytes at 0x%08"
+		eprintf ("io.mach: Cannot set page perms for %d byte(s) at 0x%08"
 			PFMT64x"\n", (int)pagesize, (ut64)pageaddr);
 		return -1;
 	}
@@ -375,7 +375,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 	}
 	if (!task) {
 		if (pid > 0 && !strncmp (file, "smach://", 8)) {
-			kill (pid, 9);
+			kill (pid, SIGKILL);
 			eprintf ("Child killed\n");
 		}
 #if 0
@@ -384,7 +384,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 		 * what was this intended to check anyway ? */
 		if (pid > 0 && io->referer && !strncmp (io->referer, "dbg://", 6)) {
 			eprintf ("Child killed\n");
-			kill (pid, 9);
+			kill (pid, SIGKILL);
 		}
 #endif
 		switch (errno) {
@@ -393,7 +393,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 			break;
 		case EINVAL:
 			perror ("ptrace: Cannot attach");
-			eprintf ("Possibly unsigned r2. Please see doc/osx.md\n");
+			eprintf ("Possibly unsigned r2. Please see doc/macos.md\n");
 			eprintf ("ERRNO: %d (EINVAL)\n", errno);
 			break;
 		default:
@@ -418,10 +418,10 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 		: strdup ("kernel");
 	if (!strncmp (file, "smach://", 8)) {
 		ret = r_io_desc_new (io, &r_io_plugin_mach, &file[1],
-			       rw | R_IO_EXEC, mode, iodd);
+			       rw | R_PERM_X, mode, iodd);
 	} else {
 		ret = r_io_desc_new (io, &r_io_plugin_mach, file,
-			       rw | R_IO_EXEC, mode, iodd);
+			       rw | R_PERM_X, mode, iodd);
 	}
 	ret->name = pidpath;
 	return ret;
@@ -463,15 +463,15 @@ static int __close(RIODesc *fd) {
 	return kr == KERN_SUCCESS;
 }
 
-static int __system(RIO *io, RIODesc *fd, const char *cmd) {
+static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 	if (!io || !fd || !cmd || !fd->data) {
-		return 0;
+		return NULL;
 	}
 	RIODescData *iodd = fd->data;
 	if (iodd->magic != R_MACH_MAGIC) {
-		return false;
+		return NULL;
 	}
-	
+
 	task_t task = pid_to_task (iodd->tid);
 	/* XXX ugly hack for testing purposes */
 	if (!strncmp (cmd, "perm", 4)) {
@@ -482,20 +482,22 @@ static int __system(RIO *io, RIODesc *fd, const char *cmd) {
 		} else {
 			eprintf ("Usage: =!perm [rwx]\n");
 		}
-		return 0;
+		return NULL;
 	}
 	if (!strncmp (cmd, "pid", 3)) {
 		const char *pidstr = cmd + 3;
 		int pid = -1;
 		if (*pidstr) {
-			int pid = __get_pid (fd);
-			return 0;
+			// int pid = __get_pid (fd);
+			return NULL;
 		}
 		if (!strcmp (pidstr, "0")) {
 			pid = 0;
 		} else {
 			pid = atoi (pidstr);
-			if (!pid) pid = -1;
+			if (!pid) {
+				pid = -1;
+			}
 		}
 		if (pid != -1) {
 			task_t task = pid_to_task (pid);
@@ -504,14 +506,14 @@ static int __system(RIO *io, RIODesc *fd, const char *cmd) {
 				eprintf ("TODO: must set the pid in io here\n");
 		//		riom->pid = pid;
 		//		riom->task = task;
-				return 0;
+				return NULL;
 			}
 		}
 		eprintf ("io_mach_system: Invalid pid %d\n", pid);
 	} else {
 		eprintf ("Try: '=!pid' or '=!perm'\n");
 	}
-	return 1;
+	return NULL;
 }
 
 static int __get_pid (RIODesc *desc) {
@@ -555,7 +557,7 @@ RIOPlugin r_io_plugin_mach = {
 #endif
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_mach,
 	.version = R2_VERSION

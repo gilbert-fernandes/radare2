@@ -39,11 +39,12 @@ static struct r_syscall_regs_t fastcall_x86_64 [R_SYSCALL_ARGS] = {
 	{{ "rax", "rdi", NULL }},
 	{{ "rax", "rdi", "rsi", NULL }},
 	{{ "rax", "rdi", "rsi", "rdx", NULL }},
-	{{ "rax", "rdi", "rsi", "rdx", "rdx", NULL }},
-	{{ "rax", "rdi", "rsi", "rdx", "rdx", "r8", NULL }},
+	{{ "rax", "rdi", "rsi", "rdx", "rcx", NULL }},
+	{{ "rax", "rdi", "rsi", "rdx", "rcx", "r8", NULL }},
 	{{ NULL }}
 };
 
+#if 0
 static struct r_syscall_regs_t fastcall_x86_64_msvc [R_SYSCALL_ARGS] = {
 	{{ "rdi", NULL }},
 	{{ "rdi", "rsi", NULL }},
@@ -53,6 +54,7 @@ static struct r_syscall_regs_t fastcall_x86_64_msvc [R_SYSCALL_ARGS] = {
 	{{ "rdi", "rsi", "rdx", "rdx", "r8", "r9", NULL }},
 	{{ NULL }}
 };
+#endif
 
 static struct r_syscall_regs_t fastcall_x86_8 [R_SYSCALL_ARGS] = {
 	{{ "ax", NULL }},

@@ -45,12 +45,12 @@ static int perform_mapped_file_yank(RCore *core, ut64 offset, ut64 len, const ch
 	if (filename && *filename) {
 		ut64 load_align = r_config_get_i (core->config, "file.loadalign");
 		RIOMap *map = NULL;
-		yankdesc = r_io_open_nomap (core->io, filename, R_IO_READ, 0644);
+		yankdesc = r_io_open_nomap (core->io, filename, R_PERM_R, 0644);
 		// map the file in for IO operations.
 		if (yankdesc && load_align) {
 			yank_file_sz = r_io_size (core->io);
-			map = r_io_map_add_next_available (core->io, yankdesc->fd, R_IO_READ, 0, 0, yank_file_sz, load_align);
-			loadaddr = map? map->from: -1;
+			map = r_io_map_add_next_available (core->io, yankdesc->fd, R_PERM_R, 0, 0, yank_file_sz, load_align);
+			loadaddr = map? map->itv.addr: -1;
 			if (yankdesc && map && loadaddr != -1) {
 				// ***NOTE*** this is important, we need to
 				// address the file at its physical address!
@@ -143,7 +143,7 @@ R_API int r_core_yank(struct r_core_t *core, ut64 addr, int len) {
 	if (addr != core->offset) {
 		r_core_seek (core, addr, 1);
 	}
-	r_core_read_at (core, addr, buf, len);
+	r_io_read_at (core->io, addr, buf, len);
 	r_core_yank_set (core, addr, buf, len);
 	if (curseek != addr) {
 		r_core_seek (core, curseek, 1);
@@ -169,7 +169,7 @@ R_API int r_core_yank_string(RCore *core, ut64 addr, int maxlen) {
 		return false;
 	}
 	buf[core->blocksize] = 0;
-	r_core_read_at (core, addr, buf, core->blocksize);
+	r_io_read_at (core->io, addr, buf, core->blocksize);
 	if (maxlen == 0) {
 		// Don't use strnlen, see: http://sourceforge.net/p/mingw/bugs/1912/
 		maxlen = r_str_nlen ((const char *) buf, core->blocksize);

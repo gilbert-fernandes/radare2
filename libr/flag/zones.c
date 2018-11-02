@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2016 - pancake */
+/* radare - LGPL - Copyright 2016-2018 - pancake */
 
 #include <r_flag.h>
 #include <r_util.h>
@@ -20,14 +20,10 @@ static RFlagZoneItem *r_flag_zone_get (RFlag *f, const char *name) {
 #endif
 
 R_API bool r_flag_zone_add(RFlag *f, const char *name, ut64 addr) {
-#if 1
-	if (!name || !f || !*name) {
-		return false;
-	}
-#endif
+	r_return_val_if_fail (f && name && *name, false);
 #if R_FLAG_ZONE_USE_SDB
 	RFlagZoneItem zi = { 0, 0, (const char *)name };
-	if (!f || !DB || !name) {
+	if (!DB) {
 		return false;
 	}
 	const char *bound = sdb_const_get (DB, name, NULL);
@@ -43,7 +39,7 @@ R_API bool r_flag_zone_add(RFlag *f, const char *name, ut64 addr) {
 		sdb_set (DB, name, newBounds, 0);
 		free (newBounds);
 	} else {
-		sdb_set (DB, name, sdb_fmt (0, "%"PFMT64d",%"PFMT64d, addr, addr), 0);
+		sdb_set (DB, name, sdb_fmt ("%"PFMT64d",%"PFMT64d, addr, addr), 0);
 	}
 #else
 	RFlagZoneItem *zi = r_flag_zone_get (f, name);

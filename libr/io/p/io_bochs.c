@@ -1,4 +1,4 @@
-// Copyright (c) 2016 - LGPL, SkUaTeR, All rights reserved.
+// Copyright (c) 2016-2017 - LGPL, SkUaTeR, All rights reserved.
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -6,10 +6,10 @@
 #include <libbochs.h>
 
 typedef struct {
-	libbochs_t desc;    
+	libbochs_t desc;
 } RIOBochs;
 
-static libbochs_t *desc = NULL; 
+static libbochs_t *desc = NULL;
 static RIODesc *riobochs = NULL;
 extern RIOPlugin r_io_plugin_bochs; // forward declaration
 
@@ -77,9 +77,10 @@ static ut64 __lseek(RIO *io, RIODesc *fd, ut64 offset, int whence) {
 static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 	memset (buf, 0xff, count);
 	ut64 addr = io->off;
-	if (!desc || !desc->data) 
+	if (!desc || !desc->data) {
 		return -1;
-        lprintf ("io_read ofs= %016"PFMT64x" count= %x\n", io->off, count);
+	}
+	lprintf ("io_read ofs= %016"PFMT64x" count= %x\n", io->off, count);
 	bochs_read (desc,addr,count,buf);
 	return count;
 }
@@ -89,8 +90,8 @@ static int __close(RIODesc *fd) {
 	bochs_close (desc);
 	return true;
 }
-	
-static int __system(RIO *io, RIODesc *fd, const char *cmd) {
+
+static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
         lprintf ("system command (%s)\n", cmd);
         if (!strcmp (cmd, "help")) {
                 lprintf ("Usage: =!cmd args\n"
@@ -99,13 +100,11 @@ static int __system(RIO *io, RIODesc *fd, const char *cmd) {
 		lprintf ("io_system: Enviando comando bochs\n");
 		bochs_send_cmd (desc, &cmd[1], true);
 		io->cb_printf ("%s\n", desc->data);
-		return 1;
 	} else if (!strncmp (cmd, "dobreak", 7)) {
 		bochs_cmd_stop (desc);
 		io->cb_printf ("%s\n", desc->data);
-		return 1;
-	}         
-        return true;
+	}
+        return NULL;
 }
 
 RIOPlugin r_io_plugin_bochs = {
@@ -123,7 +122,7 @@ RIOPlugin r_io_plugin_bochs = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_bochs,
 	.version = R2_VERSION

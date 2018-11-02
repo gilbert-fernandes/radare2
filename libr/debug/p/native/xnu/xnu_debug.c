@@ -64,24 +64,23 @@ typedef struct {
 
 /* XXX: right now it just returns the first thread, not the one selected in dbg->tid */
 static thread_t getcurthread (RDebug *dbg) {
+	thread_t th;
 	thread_array_t threads = NULL;
 	unsigned int n_threads = 0;
 	task_t t = pid_to_task (dbg->pid);
 	if (!t) {
 		return -1;
 	}
-	if (task_threads (t, &threads, &n_threads)) {
+	if (task_threads (t, &threads, &n_threads) != KERN_SUCCESS) {
 		return -1;
 	}
-	if (n_threads < 1) {
-		return -1;
+	if (n_threads > 0) {
+		memcpy (&th, threads, sizeof (th));
+	} else {
+		th = -1;
 	}
-#if 0
-	if (n_threads > 1) {
-		eprintf ("THREADS: %d\n", n_threads);
-	}
-#endif
-	return threads[0];
+	vm_deallocate (t, (vm_address_t)threads, n_threads * sizeof (thread_act_t));
+	return th;
 }
 
 static xnu_thread_t* get_xnu_thread(RDebug *dbg, int tid) {
@@ -126,27 +125,31 @@ static task_t task_for_pid_workaround(int Pid) {
 	if (kr != KERN_SUCCESS) {
 		eprintf ("host_processor_set_priv failed with error 0x%x\n", kr);
 		//mach_error ("host_processor_set_priv",kr);
-		return 0;
+		return -1;
 	}
 
 	numTasks = 0;
 	kr = processor_set_tasks (psDefault_control, &tasks, &numTasks);
 	if (kr != KERN_SUCCESS) {
 		eprintf ("processor_set_tasks failed with error %x\n", kr);
-		return 0;
+		return -1;
 	}
 	/* kernel task */
+	task_t task = -1;
 	if (Pid == 0) {
-		return tasks[0];
-	}
-	for (i = 0; i < numTasks; i++) {
-		int pid = 0;
-		pid_for_task (i, &pid);
-		if (pid == Pid) {
-			return tasks[i];
+		task = tasks[0];
+	} else {
+		for (i = 0; i < numTasks; i++) {
+			pid_t pid = 0;
+			pid_for_task (i, &pid);
+			if (pid == Pid) {
+				task = tasks[i];
+				break;
+			}
 		}
 	}
-	return 0;
+	vm_deallocate (myhost, (vm_address_t)tasks, numTasks * sizeof (task_t));
+	return task;
 }
 
 static task_t task_for_pid_ios9pangu(int pid) {
@@ -165,7 +168,7 @@ int xnu_wait(RDebug *dbg, int pid) {
 
 bool xnu_step(RDebug *dbg) {
 #if XNU_USE_PTRACE
-	int ret = ptrace (PT_STEP, dbg->pid, (caddr_t)1, 0) == 0; //SIGINT
+	int ret = r_debug_ptrace (dbg, PT_STEP, dbg->pid, (caddr_t)1, 0) == 0; //SIGINT
 	if (!ret) {
 		perror ("ptrace-step");
 		eprintf ("mach-error: %d, %s\n", ret, MACH_ERROR_STRING (ret));
@@ -196,7 +199,11 @@ bool xnu_step(RDebug *dbg) {
 
 int xnu_attach(RDebug *dbg, int pid) {
 #if XNU_USE_PTRACE
-	if (ptrace (PT_ATTACH, pid, 0, 0) == -1) {
+#if PT_ATTACHEXC
+	if (r_debug_ptrace (dbg, PT_ATTACHEXC, pid, 0, 0) == -1) {
+#else
+	if (r_debug_ptrace (dbg, PT_ATTACH, pid, 0, 0) == -1) {
+#endif
 		perror ("ptrace (PT_ATTACH)");
 		return -1;
 	}
@@ -214,7 +221,7 @@ int xnu_attach(RDebug *dbg, int pid) {
 
 int xnu_detach(RDebug *dbg, int pid) {
 #if XNU_USE_PTRACE
-	return ptrace (PT_DETACH, pid, NULL, 0);
+	return r_debug_ptrace (dbg, PT_DETACH, pid, NULL, 0);
 #else
 	kern_return_t kr;
 	//do the cleanup necessary
@@ -291,7 +298,7 @@ int xnu_continue(RDebug *dbg, int pid, int tid, int sig) {
 #if XNU_USE_PTRACE
 	void *data = (void*)(size_t)((sig != -1) ? sig : dbg->reason.signum);
 	task_resume (pid_to_task (pid));
-	return ptrace (PT_CONTINUE, pid, (void*)(size_t)1,
+	return r_debug_ptrace (dbg, PT_CONTINUE, pid, (void*)(size_t)1,
 			(int)(size_t)data) == 0;
 #else
 	task_t task = pid_to_task (pid);
@@ -300,7 +307,7 @@ int xnu_continue(RDebug *dbg, int pid, int tid, int sig) {
 		return false;
 	}
 	//TODO free refs count threads
-	xnu_thread_t *th  = get_xnu_thread (dbg, getcurthread (dbg));
+	xnu_thread_t *th = get_xnu_thread (dbg, getcurthread (dbg));
 	if (!th) {
 		eprintf ("failed to get thread in xnu_continue\n");
 		return false;
@@ -324,7 +331,7 @@ int xnu_continue(RDebug *dbg, int pid, int tid, int sig) {
 #endif
 }
 
-const char *xnu_reg_profile(RDebug *dbg) {
+char *xnu_reg_profile(RDebug *dbg) {
 #if __i386__ || __x86_64__
 	if (dbg->bits & R_SYS_BITS_32) {
 #		include "reg/darwin-x86.h"
@@ -540,13 +547,6 @@ static vm_prot_t unix_prot_to_darwin(int prot) {
 int xnu_map_protect (RDebug *dbg, ut64 addr, int size, int perms) {
 	int ret;
 	task_t task = pid_to_task (dbg->tid);
-	// TODO: align pointers
-#if 0
-	xnu_thread_t *th = get_xnu_thread (dbg, dbg->tid);
-	if (!th) {
-		return false;
-	}
-#endif
 #define xwr2rwx(x) ((x&1)<<2) | (x&2) | ((x&4)>>2)
 	int xnu_perms = xwr2rwx (perms);
 	ret = mach_vm_protect (task, (vm_address_t)addr, (vm_size_t)size, (boolean_t)0, xnu_perms); //VM_PROT_COPY | perms);
@@ -590,8 +590,8 @@ task_t pid_to_task (int pid) {
 							(char *)MACH_ERROR_STRING (err));
 				}
 				eprintf ("You probably need to run as root or sign "
-					"the binary.\n Read doc/ios.md || doc/osx.md\n"
-					" make -C binr/radare2 ios-sign || osx-sign\n");
+					"the binary.\n Read doc/ios.md || doc/macos.md\n"
+					" make -C binr/radare2 ios-sign || macos-sign\n");
 				return 0;
 			}
 		}
@@ -776,7 +776,6 @@ static int xnu_write_mem_maps_to_buffer (RBuffer *buffer, RList *mem_maps, int s
 		sc->initprot = xwr2rwx (curr_map->perm);
 		sc->nsects = 0;
 #endif
-
 		if ((curr_map->perm & VM_PROT_READ) == 0) {
 			mach_vm_protect (task_dbg, curr_map->addr, curr_map->size, FALSE,
 				curr_map->perm | VM_PROT_READ);
@@ -965,12 +964,11 @@ bool xnu_generate_corefile (RDebug *dbg, RBuffer *dest) {
 
 cleanup:
 	//if (corefile_fd > 0) close (corefile_fd);
-	if (mem_maps_buffer) r_buf_free (mem_maps_buffer);
-	if (header) free ((void *)header);
-	if (padding) free ((void *)padding);
-	if (threads_list) r_list_free (threads_list);
-	if (error) return false;
-	return true;
+	r_buf_free (mem_maps_buffer);
+	free ((void *)header);
+	free ((void *)padding);
+	r_list_free (threads_list);
+	return !error;
 }
 
 RDebugPid *xnu_get_pid (int pid) {
@@ -1125,10 +1123,12 @@ vm_address_t get_kernel_base(task_t ___task) {
 		ret = vm_region_recurse_64 (task, (vm_address_t*)&naddr,
 					   (vm_size_t*)&size, &depth,
 					   (vm_region_info_t)&info, &info_count);
-		if (ret != KERN_SUCCESS)
+		if (ret != KERN_SUCCESS) {
 			break;
-		if (size < 1)
+		}
+		if (size < 1) {
 			break;
+		}
 		if (addr == naddr) {
 			addr += size;
 			continue;
@@ -1174,7 +1174,7 @@ static RList *xnu_dbg_modules(RDebug *dbg) {
 	ut64 info_array_address;
 	void *info_array = NULL;
 	//void *header_data = NULL;
-	char file_path[MAXPATHLEN];
+	char file_path[MAXPATHLEN] = {0};
 	count = TASK_DYLD_INFO_COUNT;
 	task_t task = pid_to_task (dbg->tid);
 	ut64 addr, file_path_address;
@@ -1236,8 +1236,9 @@ static RList *xnu_dbg_modules(RDebug *dbg) {
 			addr = info->image_load_address;
 			file_path_address = info->image_file_path;
 		}
+		memset (file_path, 0, MAXPATHLEN);
 		dbg->iob.read_at (dbg->iob.io, file_path_address,
-				(ut8*)file_path, MAXPATHLEN);
+				(ut8*)file_path, MAXPATHLEN - 1);
 		//eprintf ("--> %d 0x%08"PFMT64x" %s\n", i, addr, file_path);
 		size = mach0_size (dbg, addr);
 		mr = r_debug_map_new (file_path, addr, addr + size, 7, 0);
@@ -1268,8 +1269,12 @@ static RDebugMap *moduleAt(RList *list, ut64 addr) {
 static int cmp (const void *_a, const void *_b) {
 	const RDebugMap *a = _a;
 	const RDebugMap *b = _b;
-	if (a->addr > b->addr) return 1;
-	if (a->addr < b->addr) return -1;
+	if (a->addr > b->addr) {
+		return 1;
+	}
+	if (a->addr < b->addr) {
+		return -1;
+	}
 	return 0;
 }
 

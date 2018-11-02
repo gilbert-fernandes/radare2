@@ -38,6 +38,8 @@ typedef struct r_bin_elf_symbol_t {
 	char name[ELF_STRING_LENGTH];
 	int last;
 	bool in_shdr;
+	bool is_sht_null;
+	bool is_value;  /* when true, sym has no paddr, only vaddr */
 } RBinElfSymbol;
 
 typedef struct r_bin_elf_reloc_t {
@@ -122,14 +124,16 @@ ut64 Elf_(r_bin_elf_get_section_offset)(struct Elf_(r_bin_elf_obj_t) *bin, const
 ut64 Elf_(r_bin_elf_get_baddr)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut64 Elf_(r_bin_elf_p2v)(struct Elf_(r_bin_elf_obj_t) *bin, ut64 paddr);
 ut64 Elf_(r_bin_elf_v2p)(struct Elf_(r_bin_elf_obj_t) *bin, ut64 vaddr);
+ut64 Elf_(r_bin_elf_p2v_new)(struct Elf_(r_bin_elf_obj_t) *bin, ut64 paddr);
+ut64 Elf_(r_bin_elf_v2p_new)(struct Elf_(r_bin_elf_obj_t) *bin, ut64 vaddr);
 ut64 Elf_(r_bin_elf_get_boffset)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut64 Elf_(r_bin_elf_get_entry_offset)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut64 Elf_(r_bin_elf_get_main_offset)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut64 Elf_(r_bin_elf_get_init_offset)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut64 Elf_(r_bin_elf_get_fini_offset)(struct Elf_(r_bin_elf_obj_t) *bin);
 char *Elf_(r_bin_elf_intrp)(struct Elf_(r_bin_elf_obj_t) *bin);
-int Elf_(r_bin_elf_get_stripped)(struct Elf_(r_bin_elf_obj_t) *bin);
-int Elf_(r_bin_elf_get_static)(struct Elf_(r_bin_elf_obj_t) *bin);
+bool Elf_(r_bin_elf_get_stripped)(struct Elf_(r_bin_elf_obj_t) *bin);
+bool Elf_(r_bin_elf_get_static)(struct Elf_(r_bin_elf_obj_t) *bin);
 char* Elf_(r_bin_elf_get_data_encoding)(struct Elf_(r_bin_elf_obj_t) *bin);
 char* Elf_(r_bin_elf_get_arch)(struct Elf_(r_bin_elf_obj_t) *bin);
 char* Elf_(r_bin_elf_get_machine_name)(struct Elf_(r_bin_elf_obj_t) *bin);
@@ -155,5 +159,6 @@ bool Elf_(r_bin_elf_del_rpath)(struct Elf_(r_bin_elf_obj_t) *bin);
 int Elf_(r_bin_elf_has_relro)(struct Elf_(r_bin_elf_obj_t) *bin);
 int Elf_(r_bin_elf_has_nx)(struct Elf_(r_bin_elf_obj_t) *bin);
 ut8 *Elf_(r_bin_elf_grab_regstate)(struct Elf_(r_bin_elf_obj_t) *bin, int *len);
+RList *Elf_(r_bin_elf_get_maps)(ELFOBJ *bin);
 
 #endif

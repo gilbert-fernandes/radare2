@@ -76,11 +76,12 @@ R_API bool r_core_dump(RCore *core, const char *file, ut64 addr, ut64 size, int 
 		return false;
 	}
 	/* some io backends seems to be buggy in those cases */
-	if (bs > 4096)
+	if (bs > 4096) {
 		bs = 4096;
+	}
 	buf = malloc (bs);
 	if (!buf) {
-		eprintf ("Cannot alloc %d bytes\n", bs);
+		eprintf ("Cannot alloc %d byte(s)\n", bs);
 		fclose (fd);
 		return false;
 	}
@@ -111,8 +112,9 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 
 	// XXX we can work with config.block instead of dupping it
 	buf = (ut8 *)malloc (core->blocksize);
-	if (!buf)
+	if (!buf) {
 		goto beach;
+	}
 	memcpy (buf, core->block, core->blocksize);
 
 	if (op!='e') {
@@ -121,8 +123,9 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 			// r_hex_str2bin() is guaranteed to output maximum half the
 			// input size, or 1 byte if there is just a single nibble.
 			str = (char *)malloc (strlen (arg) / 2 + 1);
-			if (!str)
+			if (!str) {
 				goto beach;
+			}
 			len = r_hex_str2bin (arg, (ut8 *)str);
 			// Output is invalid if there was just a single nibble,
 			// but in that case, len is negative (-1).
@@ -137,10 +140,13 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 				goto beach;
 			}
 			str = r_mem_dup (core->yank_buf->buf, len);
-			if (!str)
+			if (!str) {
 				goto beach;
+			}
 		}
-	} else len = 0;
+	} else {
+		len = 0;
+	}
 
 	// execute the operand
 	if (op=='e') {
@@ -155,36 +161,45 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 		if (p) {
 			*p = 0;
 			from = r_num_math (core->num, s);
-			s = p+1;
+			s = p + 1;
 		}
 		p = strchr (s, ' ');
 		if (p) {
 			*p = 0;
 			to = r_num_math (core->num, s);
-			s = p+1;
+			s = p + 1;
 		}
 		p = strchr (s, ' ');
 		if (p) {
 			*p = 0;
 			step = r_num_math (core->num, s);
-			s = p+1;
+			s = p + 1;
 			wordsize = r_num_math (core->num, s);
 		} else {
 			step = r_num_math (core->num, s);
 		}
 		free (os);
 		eprintf ("from %d to %d step %d size %d\n", from, to, step, wordsize);
-		dif = (to<=from)? UT8_MAX: (to-from)+1;
-		if (wordsize==1) {
-			if (to<1 || to>UT8_MAX) to = UT8_MAX;
-			from %= (UT8_MAX+1);
-		}
-		if (dif<1) dif = UT8_MAX+1;
-		if (step<1) step = 1;
-		if (wordsize<1) wordsize = 1;
+		dif = (to <= from)? UT8_MAX: to - from + 1;
 		if (wordsize == 1) {
-			for (i=n=0; i<core->blocksize; i++, n+= step)
+			if (to < 1 || to > UT8_MAX) {
+				to = UT8_MAX;
+			}
+			from %= (UT8_MAX + 1);
+		}
+		if (dif < 1) {
+			dif = UT8_MAX + 1;
+		}
+		if (step < 1) {
+			step = 1;
+		}
+		if (wordsize < 1) {
+			wordsize = 1;
+		}
+		if (wordsize == 1) {
+			for (i = n = 0; i < core->blocksize; i++, n += step) {
 				buf[i] = (ut8)(n % dif) + from;
+			}
 		} else if (wordsize == 2) {
 			ut16 num16 = from;
 			for (i = 0; i < core->blocksize; i += wordsize, num16 += step) {
@@ -203,8 +218,7 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 		} else {
 			eprintf ("Invalid word size. Use 1, 2, 4 or 8\n");
 		}
-	} else
-	if (op=='2' || op=='4') {
+	} else if (op=='2' || op=='4') {
 		op -= '0';
 		// if i < core->blocksize would pass the test but buf[i+3] goes beyond the buffer
 		if (core->blocksize > 3) {
@@ -213,10 +227,10 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 				ut8 tmp = buf[i];
 				buf[i] = buf[i+3];
 				buf[i+3] = tmp;
-				if (op==4) {
-					tmp = buf[i+1];
-					buf[i+1] = buf[i+2];
-					buf[i+2] = tmp;
+				if (op == 4) {
+					tmp = buf[i + 1];
+					buf[i + 1] = buf[i + 2];
+					buf[i + 2] = tmp;
 				}
 			}
 		}
@@ -234,7 +248,10 @@ R_API int r_core_write_op(RCore *core, const char *arg, char op) {
 			case 'o': buf[i] |= str[j]; break;
 			case 'A': buf[i] &= str[j]; break;
 			}
-			j++; if (j>=len) j=0; /* cyclic key */
+			j++;
+			if (j >= len) {
+				j = 0; /* cyclic key */
+			}
 		}
 	}
 
@@ -257,18 +274,17 @@ static void choose_bits_anal_hints(RCore *core, ut64 addr, int *bits) {
 	}
 }
 
-
 R_API void r_core_seek_archbits(RCore *core, ut64 addr) {
 	int bits = 0;
 	const char *arch = r_io_section_get_archbits (core->io, addr, &bits);
-	if (!bits) {
+	if (!bits && !core->fixedbits) {
 		//if we found bits related with anal hints pick it up
 		choose_bits_anal_hints (core, addr, &bits);
 	}
-	if (bits) {
+	if (bits && !core->fixedbits) {
 		r_config_set_i (core->config, "asm.bits", bits);
 	}
-	if (arch) {
+	if (arch && !core->fixedarch) {
 		r_config_set (core->config, "asm.arch", arch);
 	}
 }
@@ -313,7 +329,7 @@ R_API bool r_core_write_at(RCore *core, ut64 addr, const ut8 *buf, int size) {
 		return false;
 	}
 	ret = r_io_write_at (core->io, addr, buf, size);
-	if (addr >= core->offset && addr <= core->offset + core->blocksize) {
+	if (addr >= core->offset && addr <= core->offset + core->blocksize - 1) {
 		r_core_block_read (core);
 	}
 	return ret;
@@ -369,7 +385,7 @@ R_API int r_core_shift_block(RCore *core, ut64 addr, ut64 b_size, st64 dist) {
 	}
 	shift_buf = calloc (b_size, 1);
 	if (!shift_buf) {
-		eprintf ("Cannot allocated %d bytes\n", (int)b_size);
+		eprintf ("Cannot allocated %d byte(s)\n", (int)b_size);
 		return false;
 	}
 
@@ -404,13 +420,6 @@ R_API int r_core_block_read(RCore *core) {
 		return r_io_read_at (core->io, core->offset, core->block, core->blocksize);
 	}
 	return -1;
-}
-
-R_API bool r_core_read_at(RCore *core, ut64 addr, ut8 *buf, int size) {
-	if (core) {
-		return r_io_read_at (core->io, addr, buf, size);
-	}
-	return false;
 }
 
 R_API int r_core_is_valid_offset (RCore *core, ut64 offset) {

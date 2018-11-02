@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - pancake, nibble, maijin */
+/* radare - LGPL - Copyright 2009-2018 - pancake, nibble, maijin */
 
 #include "../blob/version.c"
 #include <getopt.c> /* getopt.h is not portable :D */
@@ -30,7 +30,7 @@ static int show_analinfo(const char *arg, ut64 offset) {
 	}
 	for (ret = 0; ret < len;) {
 		aop.size = 0;
-		if (r_anal_op (anal, &aop, offset, buf + ret, len - ret) > 0) {
+		if (r_anal_op (anal, &aop, offset, buf + ret, len - ret, R_ANAL_OP_MASK_BASIC) > 0) {
 			//printf ("%s\n", R_STRBUF_SAFEGET (&aop.esil));
 		}
 		if (aop.size < 1) {
@@ -84,8 +84,9 @@ static void rasm2_list(RAsm *la, const char *arch) {
 			if (h->cpus && !strcmp (arch, h->name)) {
 				char *c = strdup (h->cpus);
 				int n = r_str_split (c, ',');
-				for (i = 0; i < n; i++)
+				for (i = 0; i < n; i++) {
 					printf ("%s\n", r_str_word_get0 (c, i));
+				}
 				free (c);
 				break;
 			}
@@ -94,15 +95,29 @@ static void rasm2_list(RAsm *la, const char *arch) {
 			if (h->bits == 27) {
 				strcat (bits, "27");
 			} else {
-				if (h->bits & 8) strcat (bits, "8 ");
-				if (h->bits & 16) strcat (bits, "16 ");
-				if (h->bits & 32) strcat (bits, "32 ");
-				if (h->bits & 64) strcat (bits, "64 ");
+				if (h->bits & 8) {
+					strcat (bits, "8 ");
+				}
+				if (h->bits & 16) {
+					strcat (bits, "16 ");
+				}
+				if (h->bits & 32) {
+					strcat (bits, "32 ");
+				}
+				if (h->bits & 64) {
+					strcat (bits, "64 ");
+				}
 			}
 			feat = "__";
-			if (h->assemble && h->disassemble) feat = "ad";
-			if (h->assemble && !h->disassemble) feat = "a_";
-			if (!h->assemble && h->disassemble) feat = "_d";
+			if (h->assemble && h->disassemble) {
+				feat = "ad";
+			}
+			if (h->assemble && !h->disassemble) {
+				feat = "a_";
+			}
+			if (!h->assemble && h->disassemble) {
+				feat = "_d";
+			}
 			feat2 = has_esil (anal, h->name);
 			if (quiet) {
 				printf ("%s\n", h->name);
@@ -148,7 +163,7 @@ static int showanal(RAnal *lanal, RAnalOp *op, ut64 offset, ut8 *buf, int len, b
 	char *bytes, *stackop = NULL;
 	int ret;
 
-	ret = r_anal_op (anal, op, offset, buf, len);
+	ret = r_anal_op (anal, op, offset, buf, len, R_ANAL_OP_MASK_ESIL);
 	if (ret) {
 		stackop = stackop2str (op->stackop);
 		optype = r_anal_optype_to_string (op->type);
@@ -157,12 +172,15 @@ static int showanal(RAnal *lanal, RAnalOp *op, ut64 offset, ut8 *buf, int len, b
 			printf ("{\"opcode\": \"0x%08" PFMT64x "\",", offset);
 			printf ("\"bytes\": \"%s\",", bytes);
 			printf ("\"type\": \"%s\",", optype);
-			if (op->jump != -1LL)
+			if (op->jump != -1LL) {
 				printf ("{\"jump\": \"0x%08" PFMT64x ",", op->jump);
-			if (op->fail != -1LL)
+			}
+			if (op->fail != -1LL) {
 				printf ("{\"fail\": \"0x%08" PFMT64x ",", op->fail);
-			if (op->val != -1LL)
+			}
+			if (op->val != -1LL) {
 				printf ("{\"value\": \"0x%08" PFMT64x ",", op->val);
+			}
 			printf ("\"stackop\": \"%s\",", stackop);
 			printf ("\"esil\": \"%s\",", r_strbuf_get (&op->esil));
 			printf ("\"stackptr\": \"0x%08" PFMT64x "\"", op->stackptr);
@@ -171,14 +189,17 @@ static int showanal(RAnal *lanal, RAnalOp *op, ut64 offset, ut8 *buf, int len, b
 			printf ("offset:   0x%08" PFMT64x "\n", offset);
 			printf ("bytes:    %s\n", bytes);
 			printf ("type:     %s\n", optype);
-			if (op->jump != -1LL)
+			if (op->jump != -1LL) {
 				printf ("jump:     0x%08" PFMT64x "\n", op->jump);
-			if (op->fail != -1LL)
+			}
+			if (op->fail != -1LL) {
 				printf ("fail:     0x%08" PFMT64x "\n", op->fail);
+			}
 			//if (op->ref != -1LL)
 			//      printf ("ref:      0x%08"PFMT64x"\n", op->ref);
-			if (op->val != -1LL)
+			if (op->val != -1LL) {
 				printf ("value:    0x%08" PFMT64x "\n", op->val);
+			}
 			printf ("stackop:  %s\n", stackop);
 			printf ("esil:     %s\n", r_strbuf_get (&op->esil));
 			printf ("stackptr: %" PFMT64d "\n", op->stackptr);
@@ -214,7 +235,7 @@ static int rasm_show_help(int v) {
 			" -k [kernel]  Select operating system (linux, windows, darwin, ..)\n"
 			" -l [len]     Input/Output length\n"
 			" -L           List Asm plugins: (a=asm, d=disasm, A=analyze, e=ESIL)\n"
-			" -o [offset]  Set start address for code (default 0)\n"
+			" -o,-@ [addr] Set start address for code (default 0)\n"
 			" -O [file]    Output file name (rasm2 -Bf a.asm -O a)\n"
 			" -p           Run SPP over input for assembly\n"
 			" -q           quiet mode\n"
@@ -226,6 +247,8 @@ static int rasm_show_help(int v) {
 			" If the last argument is '-' reads from stdin\n");
 		printf ("Environment:\n"
 			" RASM2_NOPLUGINS  do not load shared plugins (speedup loading)\n"
+			" RASM2_ARCH       same as rasm2 -a\n"
+			" RASM2_BITS       same as rasm2 -b\n"
 			" R_DEBUG          if defined, show error messages and crash signal\n"
 			"");
 	}
@@ -271,7 +294,7 @@ static int rasm_disasm(char *buf, ut64 offset, int len, int bits, int ascii, int
 		RAnalOp aop = { 0 };
 		while (ret < len) {
 			aop.size = 0;
-			if (r_anal_op (anal, &aop, offset, data + ret, len - ret) > 0) {
+			if (r_anal_op (anal, &aop, offset, data + ret, len - ret, R_ANAL_OP_MASK_ESIL) > 0) {
 				printf ("%s\n", R_STRBUF_SAFEGET (&aop.esil));
 			}
 			if (aop.size < 1) {
@@ -288,11 +311,12 @@ static int rasm_disasm(char *buf, ut64 offset, int len, int bits, int ascii, int
 			int dr = r_asm_disassemble (a, &op, data + ret, len - ret);
 			if (dr == -1 || op.size < 1) {
 				op.size = 1;
-				strcpy (op.buf_asm, "invalid");
-				sprintf (op.buf_hex, "%02x", data[ret]);
+				r_asm_op_set_asm (&op, "invalid");
+				r_strbuf_set (&op.buf_hex, sdb_fmt ("%02x", data[ret]));
 			}
 			printf ("0x%08" PFMT64x "  %2d %24s  %s\n",
-				a->pc, op.size, op.buf_hex, op.buf_asm);
+				a->pc, op.size, r_asm_op_get_hex (&op),
+				r_asm_op_get_asm (&op));
 			ret += op.size;
 			r_asm_set_pc (a, offset + ret);
 		}
@@ -329,7 +353,9 @@ static void print_buf(char *str) {
 			printf ("\\x%c%c", *str, str[1]);
 		}
 		printf ("\"\n");
-	} else printf ("%s\n", str);
+	} else {
+		printf ("%s\n", str);
+	}
 }
 
 static bool print_label(void *user, const char *k, void *v) {
@@ -410,7 +436,6 @@ static int print_assembly_output(const char *buf, ut64 offset, ut64 len, int bit
 }
 
 int main (int argc, char *argv[]) {
-	const char *path;
 	const char *env_arch = r_sys_getenv ("RASM2_ARCH");
 	const char *env_bits = r_sys_getenv ("RASM2_BITS");
 	unsigned char buf[R_ASM_BUFSIZE];
@@ -439,22 +464,30 @@ int main (int argc, char *argv[]) {
 		r_lib_add_handler (l, R_LIB_TYPE_ANAL, "analysis/emulation plugins",
 				&__lib_anal_cb, &__lib_anal_dt, NULL);
 
-		path = r_sys_getenv (R_LIB_ENV);
-		if (path && *path)
+		char *path = r_sys_getenv (R_LIB_ENV);
+		if (path && *path) {
 			r_lib_opendir (l, path);
+		}
 
 		if (1) {
-			char *homeplugindir = r_str_home (R2_HOMEDIR "/plugins");
+			char *homeplugindir = r_str_home (R2_HOME_PLUGINS);
 			// eprintf ("OPENDIR (%s)\n", homeplugindir);
 			r_lib_opendir (l, homeplugindir);
 			free (homeplugindir);
 		}
 		if (1) { //where & R_CORE_LOADLIBS_SYSTEM) {
-			r_lib_opendir (l, R2_LIBDIR "/radare2/" R2_VERSION);
-			r_lib_opendir (l, R2_LIBDIR "/radare2-extras/" R2_VERSION);
-			r_lib_opendir (l, R2_LIBDIR "/radare2-bindings/" R2_VERSION);
+			char *plugindir = r_str_r2_prefix (R2_PLUGINS);
+			char *extrasdir = r_str_r2_prefix (R2_EXTRAS);
+			char *bindingsdir = r_str_r2_prefix (R2_BINDINGS);
+			r_lib_opendir (l, plugindir);
+			r_lib_opendir (l, extrasdir);
+			r_lib_opendir (l, bindingsdir);
+			free (plugindir);
+			free (extrasdir);
+			free (bindingsdir);
 		}
 		free (tmp);
+		free (path);
 	}
 
 	r_asm_use (a, R_SYS_ARCH);
@@ -474,7 +507,7 @@ int main (int argc, char *argv[]) {
 		bits = r_num_math (NULL, r2bits);
 		free (r2bits);
 	}
-	while ((c = getopt (argc, argv, "a:Ab:Bc:CdDeEf:F:hi:jk:l:Lo:O:pqrs:vw")) != -1) {
+	while ((c = getopt (argc, argv, "a:Ab:Bc:CdDeEf:F:hi:jk:l:L@:o:O:pqrs:vw")) != -1) {
 		switch (c) {
 		case 'a':
 			arch = optarg;
@@ -530,12 +563,15 @@ int main (int argc, char *argv[]) {
 			rasm2_list (a, argv[optind]);
 			ret = 1;
 			goto beach;
+		case '@':
 		case 'o':
 			offset = r_num_math (NULL, optarg);
 			break;
 		case 'O':
 			fd = open (optarg, O_TRUNC | O_RDWR | O_CREAT, 0644);
-			if (fd != -1) dup2 (fd, 1);
+			if (fd != -1) {
+				dup2 (fd, 1);
+			}
 			break;
 		case 'p':
 			use_spp = true;
@@ -586,8 +622,9 @@ int main (int argc, char *argv[]) {
 			goto beach;
 		}
 		r_anal_use (anal, arch);
-		if (!strcmp (arch, "bf"))
+		if (!strcmp (arch, "bf")) {
 			ascii = 1;
+		}
 	} else if (env_arch) {
 		if (!r_asm_use (a, env_arch)) {
 			eprintf ("rasm2: Unknown asm plugin '%s'\n", env_arch);
@@ -603,7 +640,7 @@ int main (int argc, char *argv[]) {
 	r_asm_set_bits (a, (env_bits && *env_bits)? atoi (env_bits): bits);
 	r_anal_set_bits (anal, (env_bits && *env_bits)? atoi (env_bits): bits);
 	a->syscall = r_syscall_new ();
-	r_syscall_setup (a->syscall, arch, kernel, bits);
+	r_syscall_setup (a->syscall, arch, bits, cpu, kernel);
 	{
 		bool canbebig = r_asm_set_big_endian (a, isbig);
 		if (isbig && !canbebig) {
@@ -671,8 +708,9 @@ int main (int argc, char *argv[]) {
 			content = r_file_slurp (file, &length);
 
 			if (content) {
-				if (len && len > 0 && len < length)
+				if (len && len > 0 && len < length) {
 					length = len;
+				}
 				content[length] = '\0';
 				if (skip && length > skip) {
 					if (bin) {
@@ -701,7 +739,9 @@ int main (int argc, char *argv[]) {
 			int length;
 			do {
 				length = read (0, buf, sizeof (buf) - 1);
-				if (length < 1) break;
+				if (length < 1) {
+					break;
+				}
 				if (len > 0 && len < length) {
 					length = len;
 				}
@@ -717,8 +757,9 @@ int main (int argc, char *argv[]) {
 				}
 				if (!bin || !dis) {
 					int buflen = strlen ((const char *)buf);
-					if (buf[buflen] == '\n')
+					if (buf[buflen] == '\n') {
 						buf[buflen - 1] = '\0';
+					}
 				}
 				if (dis) {
 					ret = rasm_disasm ((char *)buf, offset, length, a->bits, ascii, bin, dis - 1);
@@ -771,6 +812,7 @@ int main (int argc, char *argv[]) {
 beach:
 	r_asm_free (a);
 	r_lib_free (l);
+	free (r2arch);
 	if (fd != -1) {
 		close (fd);
 	}

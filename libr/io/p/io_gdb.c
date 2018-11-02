@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2010-2017 pancake */
+/* radare - LGPL - Copyright 2010-2018 pancake */
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -15,6 +15,7 @@ typedef struct {
 
 #define R_GDB_MAGIC r_str_hash ("gdb")
 
+static int __close(RIODesc *fd);
 static libgdbr_t *desc = NULL;
 static RIODesc *riogdb = NULL;
 
@@ -23,35 +24,10 @@ static bool __plugin_open(RIO *io, const char *file, bool many) {
 }
 
 static int debug_gdb_read_at(ut8 *buf, int sz, ut64 addr) {
-	ut32 size_max;
-	ut32 packets;
-	ut32 last;
-	ut32 x;
-	int ret = 0;
 	if (sz < 1 || addr >= UT64_MAX || !desc) {
 		return -1;
 	}
-	size_max = desc->data_max / 2;
-	if (size_max < 1) {
-		size_max = sz;
-	}
-	packets = sz / size_max;
-	last = sz % size_max;
-	for (x = 0; x < packets; x++) {
-		if (gdbr_read_memory (desc, addr + (x * size_max), size_max) < 0) {
-			return ret;
-		}
-		memcpy ((buf + (x * size_max)), desc->data + (x * size_max), R_MIN (sz, size_max));
-		ret += desc->data_len;
-	}
-	if (last) {
-		if (gdbr_read_memory (desc, addr + x * size_max, last) < 0) {
-			return ret;
-		}
-		memcpy ((buf + x * size_max), desc->data + (x * size_max), last);
-		ret += desc->data_len;
-	}
-	return ret;
+	return gdbr_read_memory (desc, addr, buf, sz);
 }
 
 static int debug_gdb_write_at(const ut8 *buf, int sz, ut64 addr) {
@@ -94,7 +70,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 		isdev = true;
 	}
 
-	rw |= R_IO_WRITE;
+	rw |= R_PERM_W;
 	if (isdev) {
 		port = strchr (host, '@');
 		if (port) {
@@ -139,8 +115,10 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 	gdbr_init (&riog->desc, false);
 
 	if (gdbr_connect (&riog->desc, host, i_port) == 0) {
+		__close (NULL);
+		// R_FREE (desc);
 		desc = &riog->desc;
-		if (pid) { // FIXME this is here for now because RDebug's pid and libgdbr's aren't properly synced.
+		if (pid > 0) { // FIXME this is here for now because RDebug's pid and libgdbr's aren't properly synced.
 			desc->pid = i_pid;
 			if (gdbr_attach (desc, i_pid) < 0) {
 				eprintf ("gdbr: Failed to attach to PID %i\n", i_pid);
@@ -149,7 +127,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 		} else if ((i_pid = desc->pid) < 0) {
 			i_pid = -1;
 		}
-		riogdb = r_io_desc_new (io, &r_io_plugin_gdb, file, R_IO_RWX, mode, riog);
+		riogdb = r_io_desc_new (io, &r_io_plugin_gdb, file, R_PERM_RWX, mode, riog);
 	}
 	// Get name
 	if (riogdb) {
@@ -163,8 +141,10 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 
 static int __write(RIO *io, RIODesc *fd, const ut8 *buf, int count) {
 	ut64 addr = io->off;
-	if (!desc || !desc->data) return -1;
-	return debug_gdb_write_at(buf, count, addr);
+	if (!desc || !desc->data) {
+		return -1;
+	}
+	return debug_gdb_write_at (buf, count, addr);
 }
 
 static ut64 __lseek(RIO *io, RIODesc *fd, ut64 offset, int whence) {
@@ -199,12 +179,14 @@ static int __close(RIODesc *fd) {
 	}
 	gdbr_disconnect (desc);
 	gdbr_cleanup (desc);
-	free (desc);
+	R_FREE (desc);
 	return -1;
 }
 
 static int __getpid(RIODesc *fd) {
+	// XXX dont use globals
 	return desc ? desc->pid : -1;
+#if 0
 	// dupe for ? r_io_desc_get_pid (desc);
 	if (!desc || !desc->data) {
 		return -1;
@@ -217,6 +199,7 @@ static int __getpid(RIODesc *fd) {
 		return iodd->pid;
 	}
 	return -1;
+#endif
 }
 
 static int __gettid(RIODesc *fd) {
@@ -226,118 +209,142 @@ static int __gettid(RIODesc *fd) {
 int send_msg(libgdbr_t* g, const char* command);
 int read_packet(libgdbr_t* instance);
 
-static int __system(RIO *io, RIODesc *fd, const char *cmd) {
-        //printf("ptrace io command (%s)\n", cmd);
-        /* XXX ugly hack for testing purposes */
-        if (!cmd[0] || cmd[0] == '?' || !strcmp (cmd, "help")) {
-                eprintf ("Usage: =!cmd args\n"
-                         " =!pid             - show targeted pid\n"
-                         " =!pkt s           - send packet 's'\n"
-                         " =!monitor cmd     - hex-encode monitor command and pass"
-                                             " to target interpreter\n"
-                         " =!detach [pid]    - detach from remote/detach specific pid\n"
-                         " =!inv.reg         - invalidate reg cache\n"
-                         " =!pktsz           - get max packet size used\n"
-                         " =!pktsz bytes     - set max. packet size as 'bytes' bytes\n"
-                         " =!exec_file [pid] - get file which was executed for"
-                                             " current/specified pid\n");
-		return true;
+static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
+	if (!desc) {
+		return NULL;
 	}
-	if (!strncmp (cmd, "pktsz", 5)) {
-		const char *ptr = r_str_chop_ro (cmd + 5);
+	if (!cmd[0] || cmd[0] == '?' || !strcmp (cmd, "help")) {
+		eprintf ("Usage: =!cmd args\n"
+			 " =!pid             - show targeted pid\n"
+			 " =!pkt s           - send packet 's'\n"
+			 " =!monitor cmd     - hex-encode monitor command and pass"
+			                     " to target interpreter\n"
+			 " =!detach [pid]    - detach from remote/detach specific pid\n"
+			 " =!inv.reg         - invalidate reg cache\n"
+			 " =!pktsz           - get max packet size used\n"
+			 " =!pktsz bytes     - set max. packet size as 'bytes' bytes\n"
+			 " =!exec_file [pid] - get file which was executed for"
+			                     " current/specified pid\n");
+		return NULL;
+	}
+	if (r_str_startswith (cmd, "pktsz")) {
+		const char *ptr = r_str_trim_ro (cmd + 5);
 		if (!isdigit (*ptr)) {
 			io->cb_printf ("packet size: %u bytes\n",
 				       desc->stub_features.pkt_sz);
-			return true;
+			return NULL;
 		}
 		ut32 pktsz;
 		if (!(pktsz = (ut32) strtoul (ptr, NULL, 10))) {
 			// pktsz = 0 doesn't make sense
-			return false;
+			return NULL;
 		}
-		desc->stub_features.pkt_sz = R_MAX (pktsz, 64); // min = 64
-		return true;
+		desc->stub_features.pkt_sz = R_MAX (pktsz, 8); // min = 64
+		return NULL;
 	}
-	if (!strncmp (cmd, "detach", 6)) {
-		int pid;
+	if (r_str_startswith (cmd, "detach")) {
+		int res;
 		if (!isspace (cmd[6]) || !desc->stub_features.multiprocess) {
-			return gdbr_detach (desc) >= 0;
+			res = gdbr_detach (desc) >= 0;
+		} else {
+			int pid = 0;
+			cmd = r_str_trim_ro (cmd + 6);
+			if (!*cmd || !(pid = strtoul (cmd, NULL, 10))) {
+				res = gdbr_detach (desc) >= 0;
+			} else {
+				res = gdbr_detach_pid (desc, pid) >= 0;
+			}
 		}
-		cmd = r_str_chop_ro (cmd + 6);
-		if (!*cmd || !(pid = strtoul (cmd, NULL, 10))) {
-			return gdbr_detach (desc) >= 0;
-		}
-		return gdbr_detach_pid (desc, pid) >= 0;
+		eprintf ("%d\n", res);
+		return NULL;
 	}
-	if (!strncmp (cmd, "pkt ", 4)) {
+	if (r_str_startswith (cmd, "pkt ")) {
 		if (send_msg (desc, cmd + 4) == -1) {
-			return false;
+			return NULL;
 		}
-		int r = read_packet (desc);
+		(void)read_packet (desc);
 		desc->data[desc->data_len] = '\0';
 		io->cb_printf ("reply:\n%s\n", desc->data);
 		if (!desc->no_ack) {
 			eprintf ("[waiting for ack]\n");
 		}
-		return r >= 0;
+		// return r >= 0;
+		return NULL;
 	}
-	if (!strncmp (cmd, "pid", 3)) {
+	if (r_str_startswith (cmd, "pid")) {
 		int pid = desc ? desc->pid : -1;
 		if (!cmd[3]) {
 			io->cb_printf ("%d\n", pid);
 		}
-		return pid;
+		return r_str_newf ("%d", pid);
 	}
-	if (!strncmp (cmd, "monitor", 7)) {
+	if (r_str_startswith (cmd, "monitor")) {
 		const char *qrcmd = cmd + 8;
 		if (!isspace (cmd[7])) {
 			qrcmd = "help";
 		}
 		if (gdbr_send_qRcmd (desc, qrcmd, io->cb_printf) < 0) {
 			eprintf ("remote error\n");
-			return false;
+			return NULL;
 		}
-		return true;
+		return NULL;
 	}
-	if (!strncmp (cmd, "inv.reg", 7)) {
+	if (r_str_startswith (cmd, "inv.reg")) {
 		gdbr_invalidate_reg_cache ();
-		return true;
+		return NULL;
 	}
 	if (r_str_startswith (cmd, "exec_file")) {
 		const char *ptr = cmd + strlen ("exec_file");
 		char *file;
-		int pid;
 		if (!isspace (*ptr)) {
-			if (!(file = gdbr_exec_file_read (desc, 0))) {
-				return false;
-			}
+			file = gdbr_exec_file_read (desc, 0);
 		} else {
 			while (isspace (*ptr)) {
 				ptr++;
 			}
 			if (isdigit (*ptr)) {
-				pid = atoi (ptr);
-				if (!(file = gdbr_exec_file_read (desc, pid))) {
-					return false;
-				}
+				int pid = atoi (ptr);
+				file = gdbr_exec_file_read (desc, pid);
 			} else {
-				if (!(file = gdbr_exec_file_read (desc, 0))) {
-					return false;
-				}
+				file = gdbr_exec_file_read (desc, 0);
 			}
 		}
+		if (!file) {
+			return NULL;
+		}
 		io->cb_printf ("%s\n", file);
-		free (file);
-		return true;
+		return file;
 	}
-	// This is internal, not available to user. Sets a flag that next call to
-	// get memmap will be for getting baddr
+	// These are internal, not available to user directly
+	if (r_str_startswith (cmd, "retries")) {
+		int num_retries;
+		if (isspace (cmd[7]) && isdigit (cmd[8])) {
+			if ((num_retries = atoi (cmd + 8)) >= 1) {
+				desc->num_retries = num_retries;
+			}
+			return NULL;
+		}
+		io->cb_printf ("num_retries: %d byte(s)\n", desc->page_size);
+		return NULL;
+	}
+	if (r_str_startswith (cmd, "page_size")) {
+		int page_size;
+		if (isspace (cmd[9]) && isdigit (cmd[10])) {
+			if ((page_size = atoi (cmd + 10)) >= 64) {
+				desc->page_size = page_size;
+			}
+			return NULL;
+		}
+		io->cb_printf ("page size: %d byte(s)\n", desc->page_size);
+		return NULL;
+	}
+	// Sets a flag that next call to get memmap will be for getting baddr
 	if (!strcmp (cmd, "baddr")) {
 		desc->get_baddr = true;
-		return true;
+		return NULL;
 	}
 	eprintf ("Try: '=!?'\n");
-	return true;
+	return NULL;
 }
 
 RIOPlugin r_io_plugin_gdb = {
@@ -358,7 +365,7 @@ RIOPlugin r_io_plugin_gdb = {
 };
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_gdb,
 	.version = R2_VERSION

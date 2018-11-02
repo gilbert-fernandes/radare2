@@ -111,8 +111,6 @@ static int init_pdb7_root_stream(R_PDB *pdb, int *root_page_list, int pages_amou
 	int i = 0;
 	int pos = 0;
 
-	char *tmp;
-
 	R_PDB7_ROOT_STREAM *root_stream7;
 
 	pdb->root_stream = R_NEW0 (R_PDB7_ROOT_STREAM);
@@ -182,7 +180,7 @@ static int init_pdb7_root_stream(R_PDB *pdb, int *root_page_list, int pages_amou
 		}
 
 		ut32 size = num_pages * 4;
-		tmp = (char *) calloc (num_pages, 4);
+		ut8 *tmp = (ut8 *) calloc (num_pages, 4);
 		page = R_NEW0 (SPage);
 		if (num_pages != 0) {
 			if ((pos + size) > tmp_data_max_size) {
@@ -262,7 +260,7 @@ static void free_info_stream(void *stream) {
 
 ///////////////////////////////////////////////////////////////////////////////
 #define ADD_INDX_TO_LIST(list, index, stream_size, stream_type, free_func, parse_func) {\
-		if (index != -1) {							\
+		if ((index) != -1) {							\
 			SStreamParseFunc *stream_parse_func = R_NEW0 (SStreamParseFunc);\
 			if (!stream_parse_func) { return; }				\
 			stream_parse_func->indx = (index);				\
@@ -270,7 +268,7 @@ static void free_info_stream(void *stream) {
 			stream_parse_func->parse_stream = (parse_func);			\
 			stream_parse_func->free = (free_func);				\
 			if (stream_size) {						\
-				stream_parse_func->stream = malloc (stream_size);	\
+				stream_parse_func->stream = calloc (1, stream_size);	\
 				if (!stream_parse_func->stream) {			\
 					R_FREE (stream_parse_func);			\
 					return;						\
@@ -284,9 +282,9 @@ static void free_info_stream(void *stream) {
 
 ///////////////////////////////////////////////////////////////////////////////
 static void fill_list_for_stream_parsing(RList *l, SDbiStream *dbi_stream) {
-	ADD_INDX_TO_LIST (l, dbi_stream->dbi_header.symrecStream, sizeof(SGDATAStream),
+	ADD_INDX_TO_LIST (l, dbi_stream->dbi_header.symrecStream, sizeof (SGDATAStream),
 		ePDB_STREAM_GSYM, free_gdata_stream, parse_gdata_stream);
-	ADD_INDX_TO_LIST (l, dbi_stream->dbg_header.sn_section_hdr, sizeof(SPEStream),
+	ADD_INDX_TO_LIST (l, dbi_stream->dbg_header.sn_section_hdr, sizeof (SPEStream),
 		ePDB_STREAM_SECT_HDR, free_pe_stream, parse_pe_stream);
 	ADD_INDX_TO_LIST (l, dbi_stream->dbg_header.sn_section_hdr_orig, sizeof(SPEStream),
 		ePDB_STREAM_SECT__HDR_ORIG, free_pe_stream, parse_pe_stream);
@@ -554,17 +552,17 @@ static void finish_pdb_parse(R_PDB *pdb) {
 		switch (i) {
 		case 1:
 			pdb_info_stream = (SPDBInfoStream *) r_list_iter_get (it);
-			// pdb_info_stream->free_(pdb_info_stream);
+			pdb_info_stream->free_(pdb_info_stream);
 			free (pdb_info_stream);
 			break;
 		case 2:
 			tpi_stream = (STpiStream *) r_list_iter_get (it);
-			// tpi_stream->free_(tpi_stream);
+			tpi_stream->free_(tpi_stream);
 			free (tpi_stream);
 			break;
 		case 3:
 			dbi_stream = (SDbiStream *) r_list_iter_get (it);
-			// dbi_stream->free_(dbi_stream);
+			dbi_stream->free_(dbi_stream);
 			free (dbi_stream);
 			break;
 		default:
@@ -573,7 +571,7 @@ static void finish_pdb_parse(R_PDB *pdb) {
 				break;
 			}
 			pdb_stream = (R_PDB_STREAM *) r_list_iter_get (it);
-			// pdb_stream->free_(pdb_stream);
+			pdb_stream->free_(pdb_stream);
 			free (pdb_stream);
 			break;
 		}
@@ -583,7 +581,7 @@ static void finish_pdb_parse(R_PDB *pdb) {
 	r_list_free (pdb->pdb_streams);
 	// enf of free of pdb->pdb_streams
 
-#if 0
+#if 1
 	// start of free pdb->pdb_streams2
 	it = r_list_iterator (pdb->pdb_streams2);
 	while (r_list_iter_next (it)) {
@@ -599,7 +597,7 @@ static void finish_pdb_parse(R_PDB *pdb) {
 	// end of free pdb->streams2
 
 	free (pdb->stream_map);
-	free (pdb->buf);
+	r_buf_free (pdb->buf);
 
 // fclose(pdb->fp);
 // printf("finish_pdb_parse()\n");
@@ -691,7 +689,10 @@ static int build_format_flags(R_PDB *pdb, char *type, int pos, char *res_field, 
 			if (!name) {
 				return 0;
 			}
+			r_name_filter (tmp, -1);
+			r_name_filter (*name_field, -1);
 			strcpy (name, tmp);
+
 			sprintf (name, "(%s)%s", tmp, *name_field);
 			free (*name_field);
 			*name_field = name;
@@ -795,18 +796,18 @@ void build_command_field(ELeafType lt, char **command_field) {
 	switch (lt) {
 	case eLF_STRUCTURE:
 	case eLF_UNION:
-		*command_field = (char *) malloc (strlen ("pf") + 1);
+		*command_field = (char *) malloc (strlen ("pf.") + 1);
 		if (!(*command_field)) {
 			break;
 		}
 		strcpy (*command_field, "pf.");
 		break;
 	case eLF_ENUM:
-		*command_field = (char *) malloc (strlen ("\"td enum") + 1);
+		*command_field = (char *) malloc (strlen ("\"td enum ") + 1);
 		if (!(*command_field)) {
 			break;
 		}
-		strcpy (*command_field, "\"td enum");
+		strcpy (*command_field, "\"td enum ");
 		break;
 	default:
 		break;
@@ -815,9 +816,11 @@ void build_command_field(ELeafType lt, char **command_field) {
 
 ///////////////////////////////////////////////////////////////////////////////
 void build_name_field(char *name, char **name_field) {
-	*name_field = name? strdup (name): NULL;
-	r_name_filter (*name_field, -1);
-	r_str_replace_char (*name_field, ':', '_');
+	if (name_field) {
+		*name_field = name? strdup (name): NULL;
+		r_name_filter (*name_field, -1);
+		r_str_replace_char (*name_field, ':', '_');
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -837,7 +840,7 @@ int build_flags_format_and_members_field(R_PDB *pdb, ELeafType lt, char *name, c
 		*pos = *pos + 1;
 		break;
 	case eLF_ENUM:
-		members_field[i] = r_str_newf ("%s=%08x", name, offset);
+		members_field[i] = r_str_newf ("%s=0x%"PFMT64x, name, offset);
 #if 0
 		members_field[i] = (char *) malloc (sizeof(char) * strlen (name) + 8 + 1 + 1);	// 8 - hex int, 1 - =
 		if (!members_field[i]) {
@@ -850,7 +853,6 @@ int build_flags_format_and_members_field(R_PDB *pdb, ELeafType lt, char *name, c
 		return 0;
 	}
 
-	r_name_filter (members_field[i], -1);
 	return 1;
 }
 
@@ -957,8 +959,8 @@ static void print_types(R_PDB *pdb, int mode) {
 					break;
 				case eLF_STRUCTURE:
 				case eLF_UNION:
-					pdb->cb_printf ("{\"type\":\"%s\",\"name\":\"%s\",\"%s\":[",
-						"structure", name, "members");
+					pdb->cb_printf ("{\"type\":\"%s\",\"name\":\"%s\",\"size\":%d,\"%s\":[",
+						"structure", name, val, "members");
 					break;
 				default:
 					continue;
@@ -1018,7 +1020,7 @@ static void print_types(R_PDB *pdb, int mode) {
 			}
 
 			if (mode == 'r') {
-				pdb->cb_printf ("%s %s ", command_field, name_field);
+				pdb->cb_printf ("%s%s ", command_field, name_field);
 				if (lt != eLF_ENUM) {
 					pdb->cb_printf ("%s ", flags_format_field);
 				} else {
@@ -1127,27 +1129,27 @@ static void print_gvars(R_PDB *pdb, ut64 img_base, int format) {
 				if (!is_first) {
 					pdb->cb_printf (",");
 				}
-				pdb->cb_printf ("{\"%s\":%d,\"%s\":%d,\"%s\":\"%s\",\"%s\":\"%s\"}",
+				pdb->cb_printf ("{\"%s\":%d,\"%s\":%d,\"%s\":\"%.*s\",\"%s\":\"%s\"}",
 					"address", (ut64) (img_base + omap_remap ((omap)? (omap->stream): 0, gdata->offset + sctn_header->virtual_address)),
 					"symtype", gdata->symtype,
-					"section_name", sctn_header->name,
+					"section_name", PDB_SIZEOF_SECTION_NAME, sctn_header->name,
 					"gdata_name", name);
 				break;
 			case 1:
 			case '*':
 			case 'r':
-				pdb->cb_printf ("f pdb.%s = 0x%"PFMT64x " # %d %s\n",
+				pdb->cb_printf ("f pdb.%s = 0x%"PFMT64x " # %d %.*s\n",
 					name,
 					(ut64) (img_base + omap_remap ((omap)? (omap->stream): 0,
 							gdata->offset + sctn_header->virtual_address)),
-					gdata->symtype, sctn_header->name);
+					gdata->symtype, PDB_SIZEOF_SECTION_NAME, sctn_header->name);
 				break;
 			case 'd':
 			default:
-				pdb->cb_printf ("0x%08"PFMT64x "  %d  %s  %s\n",
+				pdb->cb_printf ("0x%08"PFMT64x "  %d  %.*s  %s\n",
 					(ut64) (img_base + omap_remap ((omap)? (omap->stream): 0,
 							gdata->offset + sctn_header->virtual_address)),
-					gdata->symtype, sctn_header->name, name);
+					gdata->symtype, PDB_SIZEOF_SECTION_NAME, sctn_header->name, name);
 				break;
 			}
 			free (name);
@@ -1175,6 +1177,10 @@ R_API bool init_pdb_parser(R_PDB *pdb, const char *filename) {
 		pdb->cb_printf = (PrintfCallback) printf;
 	}
 	pdb->buf = r_buf_new_slurp (filename);
+	if (!pdb->buf) {
+		eprintf ("File reading error/empty file\n");
+		goto error;
+	}
 // pdb->fp = r_sandbox_fopen (filename, "rb");
 // if (!pdb->fp) {
 // eprintf ("file %s can not be open\n", filename);

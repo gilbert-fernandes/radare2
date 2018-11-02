@@ -123,7 +123,7 @@ int copy_string(STypeCodeStr *type_code_str, char *str_for_copy, unsigned int co
 		return 0;
 	}
 	if (free_space > str_for_copy_len) {
-		int newlen = ((type_code_str->type_str_len + str_for_copy_len) << 1) + 1;
+		int newlen = type_code_str->type_str_len + (str_for_copy_len << 1) + 1;
 		if (newlen < 1) {
 			R_FREE (type_code_str->type_str);
 			goto copy_string_err;
@@ -299,7 +299,9 @@ int get_namespace_and_name(	char *buf, STypeCodeStr *type_code_str,
 		{
 			int i = 0;
 			str_info = (SStrInfo *) malloc (sizeof(SStrInfo));
-			if (!str_info) break;
+			if (!str_info) {
+				break;
+			}
 			i = get_template (buf + 1, str_info);
 			if (!i) {
 				R_FREE (str_info);
@@ -482,9 +484,9 @@ get_namespace_and_name_err:
 
 #define DEF_STATE_ACTION(action) static void tc_state_##action(SStateInfo *state, STypeCodeStr *type_code_str)
 #define GO_TO_NEXT_STATE(state, new_state) { \
-	state->amount_of_read_chars++; \
-	state->buff_for_parsing++; \
-	state->state = eTCStateEnd; \
+	(state)->amount_of_read_chars++; \
+	(state)->buff_for_parsing++; \
+	(state)->state = eTCStateEnd; \
 }
 #define ONE_LETTER_ACTIION(action, type) \
 	static void tc_state_##action(SStateInfo *state, STypeCodeStr *type_code_str) \
@@ -664,8 +666,9 @@ char* get_num(SStateInfo *state)
 			state->amount_of_read_chars++;
 		}
 
-		if (*state->buff_for_parsing != '@')
+		if (*state->buff_for_parsing != '@') {
 			return ptr;
+		}
 
 		ptr = (char *)malloc (16);
 		sprintf (ptr, "%u", ret);
@@ -1087,7 +1090,7 @@ static EDemanglerErr parse_microsoft_mangled_name(char *sym, char **demangled_na
 	char *ptr64 = 0;
 	char *storage_class = 0;
 
-	type_code_str.type_str = NULL;
+	memset(&type_code_str, 0, sizeof(type_code_str));
 
 	if (!init_type_code_str_struct (&func_str)) {
 		err = eDemanglerErrMemoryAllocation;
@@ -1180,7 +1183,7 @@ static EDemanglerErr parse_microsoft_mangled_name(char *sym, char **demangled_na
 #define SET_ACCESS_MODIFIER(letter, flag_set, modifier_str) { \
 	case letter: \
 		access_modifier = modifier_str; \
-		flag_set = 1; \
+		(flag_set) = 1; \
 		break; \
 }
 	/* Functions */
@@ -1350,8 +1353,9 @@ static EDemanglerErr parse_microsoft_mangled_name(char *sym, char **demangled_na
 		}
 	}
 
-	while (*curr_pos == '@')
+	while (*curr_pos == '@') {
 		curr_pos++;
+	}
 
 	if (*curr_pos != 'Z') {
 		err = eDemanglerErrUncorrectMangledSymbol;

@@ -1,7 +1,6 @@
 /* radare - LGPL - Copyright 2009-2015 - nibble, pancake */
-
 #define R_BIN_PE64 1
-#include "bin_pe.c"
+#include "bin_pe.inc"
 
 static bool check_bytes(const ut8 *buf, ut64 length) {
 	int idx, ret = false;
@@ -9,16 +8,18 @@ static bool check_bytes(const ut8 *buf, ut64 length) {
 		return false;
 	}
 	idx = buf[0x3c] | (buf[0x3d] << 8);
-	if (length >= idx + 0x20)
+	if (length >= idx + 0x20) {
 		if (!memcmp (buf, "MZ", 2) && !memcmp (buf + idx, "PE", 2) &&
-		    !memcmp (buf + idx + 0x18, "\x0b\x02", 2))
+			!memcmp (buf + idx + 0x18, "\x0b\x02", 2)) {
 			ret = true;
+		}
+	}
 	return ret;
 }
 
-static void header(RBinFile *arch) {
-	struct PE_(r_bin_pe_obj_t) * bin = arch->o->bin_obj;
-	struct r_bin_t *rbin = arch->rbin;
+static void header(RBinFile *bf) {
+	struct PE_(r_bin_pe_obj_t) * bin = bf->o->bin_obj;
+	struct r_bin_t *rbin = bf->rbin;
 	rbin->cb_printf ("PE file header:\n");
 	rbin->cb_printf ("IMAGE_NT_HEADERS\n");
 	rbin->cb_printf ("\tSignature : 0x%x\n", bin->nt_headers->Signature);
@@ -125,6 +126,7 @@ RBinPlugin r_bin_plugin_pe64 = {
 	.license = "LGPL3",
 	.get_sdb = &get_sdb,
 	.load = &load,
+	.load_buffer = &load_buffer,
 	.load_bytes = &load_bytes,
 	.destroy = &destroy,
 	.check_bytes = &check_bytes,
@@ -143,7 +145,7 @@ RBinPlugin r_bin_plugin_pe64 = {
 };
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
 	.data = &r_bin_plugin_pe64,
 	.version = R2_VERSION

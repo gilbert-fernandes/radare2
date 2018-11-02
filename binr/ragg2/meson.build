@@ -1,6 +1,17 @@
-
 executable('ragg2', 'ragg2.c',
   include_directories: [platform_inc],
-  link_with: [r_util, r_egg, r_bin, r_core, r_hash, r_debug, r_fs, r_config, r_bp, r_crypto],
-  install: true
+  dependencies: [
+    r_util_dep,
+    r_egg_dep,
+    r_bin_dep,
+    r_core_dep,
+    r_hash_dep,
+    r_debug_dep,
+    r_fs_dep,
+    r_config_dep,
+    r_bp_dep,
+    r_crypto_dep
+  ],
+  install: true,
+  implicit_include_directories: false
 )

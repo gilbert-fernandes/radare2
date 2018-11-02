@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2017 - condret, pancake, alvaro */
+/* radare2 - LGPL - Copyright 2017-2018 - condret, pancake, alvaro */
 
 #include <r_io.h>
 #include <sdb.h>
@@ -18,7 +18,7 @@ R_API bool r_io_desc_init(RIO* io) {
 
 //shall be used by plugins for creating descs
 //XXX kill mode
-R_API RIODesc* r_io_desc_new(RIO* io, RIOPlugin* plugin, const char* uri, int flags, int mode, void* data) {
+R_API RIODesc* r_io_desc_new(RIO* io, RIOPlugin* plugin, const char* uri, int perm, int mode, void* data) {
 	ut32 fd32 = 0;
 	// this is because emscript is a bitch
 	if (!io || !plugin || !uri) {
@@ -35,7 +35,7 @@ R_API RIODesc* r_io_desc_new(RIO* io, RIOPlugin* plugin, const char* uri, int fl
 		desc->io = io;
 		desc->plugin = plugin;
 		desc->data = data;
-		desc->flags = flags;
+		desc->perm = perm;
 		//because the uri-arg may live on the stack
 		desc->uri = strdup (uri);
 	}
@@ -47,6 +47,7 @@ R_API void r_io_desc_free(RIODesc* desc) {
 		free (desc->uri);
 		free (desc->referer);
 		free (desc->name);
+		r_io_desc_cache_fini (desc);
 		if (desc->io && desc->io->files) {
 			r_id_storage_delete (desc->io->files, desc->fd);
 		}
@@ -94,7 +95,7 @@ R_API RIODesc* r_io_desc_get(RIO* io, int fd) {
 	return (RIODesc*) r_id_storage_get (io->files, fd);
 }
 
-R_API RIODesc *r_io_desc_open(RIO *io, const char *uri, int flags, int mode) {
+R_API RIODesc *r_io_desc_open(RIO *io, const char *uri, int perm, int mode) {
 	if (!io || !io->files || !uri) {
 		return NULL;
 	}
@@ -102,7 +103,7 @@ R_API RIODesc *r_io_desc_open(RIO *io, const char *uri, int flags, int mode) {
 	if (!plugin || !plugin->open) {
 		return NULL;
 	}
-	RIODesc *desc = plugin->open (io, uri, flags, mode);
+	RIODesc *desc = plugin->open (io, uri, perm, mode);
 	if (!desc) {
 		return NULL;
 	}
@@ -119,6 +120,32 @@ R_API RIODesc *r_io_desc_open(RIO *io, const char *uri, int flags, int mode) {
 	r_io_desc_add (io, desc);
 	return desc;
 }
+
+R_API RIODesc *r_io_desc_open_plugin(RIO *io, RIOPlugin *plugin, const char *uri, int perm, int mode) {
+	if (!io || !io->files || !uri) {
+		return NULL;
+	}
+	if (!plugin || !plugin->open || !plugin->check || !plugin->check (io, uri, false)) {
+		return NULL;
+	}
+	RIODesc *desc = plugin->open (io, uri, perm, mode);
+	if (!desc) {
+		return NULL;
+	}
+	// for none static callbacks, those that cannot use r_io_desc_new
+	if (!desc->plugin) {
+		desc->plugin = plugin;
+	}
+	if (!desc->uri) {
+		desc->uri = strdup (uri);
+	}
+	if (!desc->name) {
+		desc->name = strdup (uri);
+	}
+	r_io_desc_add (io, desc);
+	return desc;
+}
+
 
 R_API bool r_io_desc_close(RIODesc *desc) {
 	RIO *io;
@@ -148,29 +175,26 @@ R_API int r_io_desc_write(RIODesc *desc, const ut8* buf, int len) {
 		return r_io_desc_cache_write (desc,
 				r_io_desc_seek (desc, 0LL, R_IO_SEEK_CUR), buf, len);
 	}
-	//check permissions
-	if (!(desc->flags & R_IO_WRITE)) {
-		return 0;
-	}
-	if (desc->plugin->write) {
-		return desc->plugin->write (desc->io, desc, buf, len);
-	}
-	return 0;
+	return r_io_plugin_write (desc, buf, len);
 }
 
-//returns length of read bytes
+// returns length of read bytes
 R_API int r_io_desc_read(RIODesc *desc, ut8 *buf, int len) {
 	ut64 seek;
-	int ret = -1;
-	//check pointers and permissions
-	if (!buf || !desc || !desc->plugin || len < 1 || !(desc->flags & R_IO_READ)) {
+	// check pointers and permissions
+	if (!buf || !desc || !desc->plugin || len < 1 || !(desc->perm & R_PERM_R)) {
 		return 0;
 	}
 	seek = r_io_desc_seek (desc, 0LL, R_IO_SEEK_CUR);
-	if (desc->plugin->read) {
-		ret = desc->plugin->read (desc->io, desc, buf, len);
+	if (desc->io->cachemode) {
+		if (seek != UT64_MAX && r_io_cache_at (desc->io, seek)) {
+			return r_io_cache_read (desc->io, seek, buf, len);
+		}
 	}
-	if ((ret > 0) && desc->io && (desc->io->p_cache & 1)) {
+	int ret = r_io_plugin_read (desc, buf, len);
+	if (ret > 0 && desc->io->cachemode) {
+		r_io_cache_write (desc->io, seek, buf, len);
+	} else if ((ret > 0) && desc->io && (desc->io->p_cache & 1)) {
 		ret = r_io_desc_cache_read (desc, seek, buf, ret);
 	}
 	return ret;
@@ -184,16 +208,12 @@ R_API ut64 r_io_desc_seek(RIODesc* desc, ut64 offset, int whence) {
 }
 
 R_API ut64 r_io_desc_size(RIODesc* desc) {
-	ut64 off, ret;
 	if (!desc || !desc->plugin || !desc->plugin->lseek) {
 		return 0LL;
 	}
-	if (r_io_desc_is_blockdevice (desc)) {
-		return UT64_MAX;
-	}
-	off = r_io_desc_seek (desc, 0LL, R_IO_SEEK_CUR);
-	ret = r_io_desc_seek (desc, 0LL, R_IO_SEEK_END);
-	//what to do if that seek fails?
+	ut64 off = r_io_desc_seek (desc, 0LL, R_IO_SEEK_CUR);
+	ut64 ret = r_io_desc_seek (desc, 0LL, R_IO_SEEK_END);
+	// what to do if that seek fails?
 	r_io_desc_seek (desc, off, R_IO_SEEK_SET);
 	return ret;
 }
@@ -209,11 +229,18 @@ R_API bool r_io_desc_resize(RIODesc *desc, ut64 newsize) {
 	return false;
 }
 
-R_API bool r_io_desc_is_blockdevice (RIODesc *desc) {
+R_API bool r_io_desc_is_blockdevice(RIODesc *desc) {
 	if (!desc || !desc->plugin || !desc->plugin->is_blockdevice) {
 		return false;
 	}
 	return desc->plugin->is_blockdevice (desc);
+}
+
+R_API bool r_io_desc_is_chardevice(RIODesc *desc) {
+	if (!desc || !desc->plugin || !desc->plugin->is_chardevice) {
+		return false;
+	}
+	return desc->plugin->is_chardevice (desc);
 }
 
 R_API bool r_io_desc_exchange(RIO* io, int fd, int fdx) {
@@ -237,9 +264,9 @@ R_API bool r_io_desc_exchange(RIO* io, int fd, int fdx) {
 	if (io->maps) {
 		ls_foreach (io->maps, iter, map) {
 			if (map->fd == fdx) {
-				map->flags &= (desc->flags | R_IO_EXEC);
+				map->perm &= (desc->perm | R_PERM_X);
 			} else if (map->fd == fd) {
-				map->flags &= (descx->flags | R_IO_EXEC);
+				map->perm &= (descx->perm | R_PERM_X);
 			}
 		}
 	}

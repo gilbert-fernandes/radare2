@@ -17,6 +17,8 @@ int gdbr_init(libgdbr_t *g, bool is_server) {
 	g->is_server = is_server;
 	g->send_max = 2500;
 	g->send_buff = (char *) calloc (g->send_max, 1);
+	g->page_size = 4096;
+	g->num_retries = 10; // safe number, should be ~2.5 seconds
 	if (!g->send_buff) {
 		return -1;
 	}
@@ -55,6 +57,8 @@ int gdbr_set_architecture(libgdbr_t *g, const char *arch, int bits) {
 		g->registers = gdb_regs_lm32;
 	} else if (!strcmp (arch, "avr")) {
 		g->registers = gdb_regs_avr;
+	} else if (!strcmp (arch, "v850")) {
+		g->registers = gdb_regs_v850;
 	} else if (!strcmp (arch, "x86")) {
 		if (bits == 32) {
 			g->registers = gdb_regs_x86_32;

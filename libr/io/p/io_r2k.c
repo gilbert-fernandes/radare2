@@ -1,4 +1,4 @@
-/* io_r2k - radare2 - LGPL - Copyright 2016 - SkUaTeR + panda */
+/* io_r2k - radare2 - LGPL - Copyright 2016-2018 - SkUaTeR + panda */
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -63,7 +63,7 @@ static int r2k__close(RIODesc *fd) {
 #if __WINDOWS__
 	if (gHandleDriver) {
 		CloseHandle (gHandleDriver);
-		StartStopService ("r2k",TRUE);
+		StartStopService (TEXT ("r2k"),TRUE);
 	}
 #elif defined (__linux__) && !defined (__GNU__)
 	if (fd) {
@@ -84,25 +84,25 @@ static bool r2k__plugin_open(RIO *io, const char *pathname, bool many) {
 	return (!strncmp (pathname, "r2k://", 6));
 }
 
-static int r2k__system(RIO *io, RIODesc *fd, const char *cmd) {
+static char *r2k__system(RIO *io, RIODesc *fd, const char *cmd) {
 	if (!strncmp (cmd, "mod", 3)) {
 #if __WINDOWS__
 		GetSystemModules (io);
 #endif
 	} else {
 #if defined (__linux__) && !defined (__GNU__)
-		return run_ioctl_command (io, fd, cmd);
+		(void)run_ioctl_command (io, fd, cmd);
+		return NULL;
 #else
 		eprintf ("Try: '=!mod'\n    '.=!mod'\n");
 #endif
 	}
-	return -1;
+	return NULL;
 }
 
 static RIODesc *r2k__open(RIO *io, const char *pathname, int rw, int mode) {
 	if (!strncmp (pathname, "r2k://", 6)) {
-		rw |= R_IO_WRITE;
-		rw |= R_IO_EXEC;
+		rw |= R_PERM_WX;
 #if __WINDOWS__
 		RIOW32 *w32 = R_NEW0 (RIOW32);
 		if (Init (&pathname[6]) == FALSE) {
@@ -144,7 +144,7 @@ RIOPlugin r_io_plugin_r2k = {
 };
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_r2k,
 	.version = R2_VERSION

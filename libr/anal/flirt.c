@@ -584,8 +584,6 @@ static int module_match_buffer(const RAnal *anal, const RFlirtModule *module,
 				r_list_foreach_safe (anal->fcns, iter, iter_tmp, fcn) {
 					if (fcn->addr >= next_module_function->addr + next_module_function_size &&
 					fcn->addr < next_module_function->addr + flirt_fcn_size) {
-						r_list_join (next_module_function->refs, fcn->refs);
-						r_list_join (next_module_function->xrefs, fcn->xrefs);
 						r_list_join (next_module_function->bbs, fcn->bbs);
 						r_list_join (next_module_function->locs, fcn->locs);
 						// r_list_join (next_module_function->vars, r_anal_var_all_list (anal, fcn);
@@ -593,9 +591,9 @@ static int module_match_buffer(const RAnal *anal, const RFlirtModule *module,
 						r_anal_fcn_del ((RAnal *) anal, fcn->addr);
 					}
 				}
-				r_anal_fcn_resize (next_module_function, flirt_fcn_size);
+				r_anal_fcn_resize (anal, next_module_function, flirt_fcn_size);
 				next_module_function_size = r_anal_fcn_size (next_module_function);
-				r_anal_trim_jmprefs (next_module_function);
+				r_anal_trim_jmprefs ((RAnal *)anal, next_module_function);
 			}
 
 
@@ -796,7 +794,7 @@ static ut8 read_module_referenced_functions(RFlirtModule *module, RBuffer *b) {
 				goto err_exit;
 			}
 		}
-		if ((int) ref_function_name_length < 0) {
+		if ((int) ref_function_name_length < 0 || ref_function_name_length >= R_FLIRT_NAME_MAX) {
 			goto err_exit;
 		}
 		for (j = 0; j < ref_function_name_length; j++) {
@@ -1473,12 +1471,12 @@ R_API void r_sign_flirt_scan(const RAnal *anal, const char *flirt_file) {
 	r_buf_free (flirt_buf);
 	if (node) {
 		if (!node_match_functions (anal, node)) {
-			eprintf ("Error while scanning the file\n");
+			eprintf ("Error while scanning the file %s\n", flirt_file);
 		}
 		node_free (node);
 		return;
 	} else {
-		eprintf ("We encountered an error while parsing the file. Sorry.\n");
+		eprintf ("We encountered an error while parsing the file %s. Sorry.\n", flirt_file);
 		return;
 	}
 }

@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015-2017 - pancake */
+/* radare - LGPL - Copyright 2015-2018 - pancake */
 
 #include <stdio.h>
 #include <string.h>
@@ -70,7 +70,7 @@ static int get_mem_option(char *token) {
 	                         "xxx", "osh", "oshst", "oshld", NULL};
 	int i = 0;
 	while (options[i]) {
-		if (!strcasecmp (token, options[i])) {
+		if (!r_str_casecmp (token, options[i])) {
 			return 15 - i;
 		}
 		i++;
@@ -244,7 +244,7 @@ static ut32 cmp(ArmOp *op) {
 }
 
 
-static ut32 sturop(ArmOp *op, int k) {
+static ut32 regsluop(ArmOp *op, int k) {
 	ut32 data = UT32_MAX;
 
 	if (op->operands[1].reg_type & ARM_REG32) {
@@ -487,6 +487,8 @@ static ut32 mem_barrier (ArmOp *op, ut64 addr, int k) {
 	}
 	if (op->operands[0].type == ARM_MEM_OPT) {
 		data |= op->operands[0].mem_option << 16;
+	} else if (op->operands_count == 1 && op->operands[0].type == ARM_CONSTANT) {
+		data |= (op->operands[0].immediate << 16);
 	}
 	return data;
 }
@@ -657,6 +659,26 @@ static ut32 adr(ArmOp *op, int addr) {
 	return data;
 }
 
+static ut32 stp(ArmOp *op, int k) {
+	ut32 data = UT32_MAX;
+
+	if (op->operands[3].immediate & 0x7) {
+		return data;
+	}
+	if (k == 0x000040a9 && (op->operands[0].reg == op->operands[1].reg)) {
+		return data;
+	}
+
+	data = k;
+	data += op->operands[0].reg << 24;
+	data += op->operands[1].reg << 18;
+	data += (op->operands[2].reg & 0x7) << 29;
+	data += (op->operands[2].reg >> 3) << 16;
+	data += (op->operands[3].immediate & 0x8) << 20;
+	data += (op->operands[3].immediate >> 4) << 8;
+	return data;
+}
+
 static ut32 exception(ArmOp *op, ut32 k) {
 	ut32 data = UT32_MAX;
 
@@ -774,7 +796,7 @@ static bool parseOperands(char* str, ArmOp *op) {
 			if (token[1] == 'P' || token [1] == 'p') {
 				int i;
 				for (i = 0; msr_const[i].name; i++) {
-					if (!strncasecmp (token, msr_const[i].name, strlen (msr_const[i].name))) {
+					if (!r_str_ncasecmp (token, msr_const[i].name, strlen (msr_const[i].name))) {
 						op->operands[operand].sp_val = msr_const[i].val;
 						break;
 					}
@@ -892,11 +914,23 @@ bool arm64ass(const char *str, ut64 addr, ut32 *op) {
 		return *op != -1;
 	}
 	if (!strncmp (str, "stur", 4)) {
-		*op = sturop (&ops, 0x000000f8);
+		*op = regsluop (&ops, 0x000000f8);
+		return *op != -1;
+	}
+	if (!strncmp (str, "ldur", 4)) {
+		*op = regsluop (&ops, 0x000040f8);
 		return *op != -1;
 	}
 	if (!strncmp (str, "str", 3)) {
 		*op = reglsop (&ops, 0x000000f8);
+		return *op != -1;
+	}
+	if (!strncmp (str, "stp", 3)) {
+		*op = stp (&ops, 0x000000a9);
+		return *op != -1;
+	}
+	if (!strncmp (str, "ldp", 3)) {
+		*op = stp (&ops, 0x000040a9);
 		return *op != -1;
 	}
 	if (!strncmp (str, "sub", 3)) { // w
@@ -913,6 +947,10 @@ bool arm64ass(const char *str, ut64 addr, ut32 *op) {
 	}
 	if (!strncmp (str, "adrp x", 6)) {
 		*op = adrp (&ops, addr, 0x00000090);
+		return *op != -1;
+	}
+	if (!strcmp (str, "isb")) {
+		*op = 0xdf3f03d5;
 		return *op != -1;
 	}
 	if (!strcmp (str, "nop")) {

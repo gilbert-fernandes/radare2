@@ -11,7 +11,7 @@ CERTID?=org.radare.radare2
 BUNDLE=org.radare.radare2
 MACSDK=macosx10.10
 ENTITL=radare2.xcent
-#ENTITL=radare2.xml
+#ENTITL=radare2_ios.xml
 #CFLAGS+=-flto
 #LDFLAGS+=-flto
 
@@ -38,26 +38,26 @@ ios:
 
 ios-sign iossign sign:
 	xcrun --sdk iphoneos codesign \
-		-s- --entitlements radare2.xml radare2
-	# -f -s "$$IOS_CERTID" --entitlements radare2.xml radare2
-	#ldid -Sradare2.xml radare2
+		-s- --entitlements radare2_ios.xml radare2
+	# -f -s "$$IOS_CERTID" --entitlements radare2_ios.xml radare2
+	#ldid -Sradare2_ios.xml radare2
 
 ios_sdk_sign:
-	-codesign -s- --entitlements radare2.xml radare2
+	-codesign -s- --entitlements radare2_ios.xml radare2
 
-osx-sign osxsign:
+macos-sign macossign:
 	rm -f radare2
-	${CC} radare2.c ${CFLAGS} ${LDFLAGS} -o radare2 \
+	${CC} radare2.c ${CFLAGS} ${LDFLAGS} ${LINK} -o radare2 \
 		-sectcreate __TEXT __info_plist Info.plist \
 		-framework Security -framework CoreFoundation
-	#xcrun --sdk $(MACSDK) codesign -f -s ${CERTID} radare2
-	codesign -dvvv --deep -f -s ${CERTID} -i ${BUNDLE} radare2
+	#xcrun --sdk $(MACSDK) codesign -f -s ${CERTID} --entitlements radare2_macos.xml radare2
+	codesign -dvvv --deep -f -s ${CERTID} -i ${BUNDLE} --entitlements radare2_macos.xml radare2
 	#sudo chown root:_developer radare2
 #	sudo chown root:procmod radare2
 	#sudo chmod g+s radare2
 #	sudo chmod 4755 radare2
 
-osx-sign-libs:
+macos-sign-libs:
 	for LIB in ${SIGN_LIBS} ; do \
 		echo Signing $$LIB ; \
 		codesign -f -s ${CERTID} $$LIB ; \
@@ -73,6 +73,7 @@ LDFLAGS+=${DL_LIBS} -lm
 endif
 
 include ../../libr/socket/deps.mk
+include ../../libr/magic/deps.mk
 include ../../shlr/zip/deps.mk
 include ../../shlr/gdb/deps.mk
 include ../../shlr/java/deps.mk

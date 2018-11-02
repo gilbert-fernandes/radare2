@@ -8,7 +8,9 @@ R_API RStrpool* r_strpool_new (int sz) {
 		eprintf ("Malloc failed!\n");
 		return NULL;
 	}
-	if (sz < 1) sz = 1024;
+	if (sz < 1) {
+		sz = 1024;
+	}
 	p->str = malloc (sz);
 	if (!p->str) {
 		eprintf ("Malloc failed!\n");
@@ -71,7 +73,7 @@ R_API int r_strpool_append(RStrpool *p, const char *s) {
 
 R_API int r_strpool_ansi_chop(RStrpool *p, int n){
 	/* p->str need not be a c-string */
-	int i = r_str_ansi_chop (p->str, p->len, n);
+	int i = r_str_ansi_trim (p->str, p->len, n);
 	p->len = i;
 	return i;
 }

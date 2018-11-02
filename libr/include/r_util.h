@@ -26,6 +26,9 @@
 int gettimeofday (struct timeval* p, void* tz);
 #endif
 #include <sys/time.h>
+#include "r_util/r_event.h"
+#include "r_util/r_assert.h"
+#include "r_util/r_itv.h"
 #include "r_util/r_rbtree.h"
 #include "r_util/r_big.h"
 #include "r_util/r_base64.h"
@@ -35,6 +38,7 @@ int gettimeofday (struct timeval* p, void* tz);
 #include "r_util/r_constr.h"
 #include "r_util/r_debruijn.h"
 #include "r_util/r_cache.h"
+#include "r_util/r_ctypes.h"
 #include "r_util/r_des.h"
 #include "r_util/r_file.h"
 #include "r_util/r_hex.h"
@@ -44,6 +48,7 @@ int gettimeofday (struct timeval* p, void* tz);
 #include "r_util/r_name.h"
 #include "r_util/r_num.h"
 #include "r_util/r_graph.h"
+#include "r_util/r_panels.h"
 #include "r_util/r_pool.h"
 #include "r_util/r_punycode.h"
 #include "r_util/r_queue.h"
@@ -53,6 +58,7 @@ int gettimeofday (struct timeval* p, void* tz);
 #include "r_util/r_spaces.h"
 #include "r_util/r_stack.h"
 #include "r_util/r_str.h"
+#include "r_util/r_ascii_table.h"
 #include "r_util/r_strbuf.h"
 #include "r_util/r_strpool.h"
 #include "r_util/r_sys.h"
@@ -61,12 +67,11 @@ int gettimeofday (struct timeval* p, void* tz);
 #include "r_util/r_utf8.h"
 #include "r_util/r_utf16.h"
 #include "r_util/r_utf32.h"
-#include "r_util/r_id_storage.h"
+#include "r_util/r_idpool.h"
 #include "r_util/r_asn1.h"
 #include "r_util/r_json.h"
 #include "r_util/r_x509.h"
 #include "r_util/r_pkcs7.h"
-#include "r_util/r_interval.h"
 
 #ifdef __cplusplus
 extern "C" {

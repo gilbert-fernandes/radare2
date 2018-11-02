@@ -1,33 +1,40 @@
-/* radare - LGPL - Copyright 2009-2014 - pancake */
-#include <string.h>
+/* radare - LGPL - Copyright 2009-2018 - pancake */
 
+#include <string.h>
 #include "r_config.h"
 #include "r_cons.h"
 #include "r_core.h"
 
 // TODO #7967 help refactor: move to another place
 static const char *help_msg_L[] = {
-	"Usage:", "L", "[-name][ file] # see oL, iL, dL, ...",
-	"L", "", "List all plugins loaded by RCore.lib",
-	"L-", "duk", "Unload plugin matching in filename",
-	"L", " blah."R_LIB_EXT, "Load plugin file",
+	"Usage:", "L[acio]", "[-name][ file]",
+	"L",  "", "show this help",
+	"L", " blah."R_LIB_EXT, "load plugin file",
+	"L-", "duk", "unload core plugin by name",
+	"LL", "", "lock screen",
+	"La", "", "list asm/anal plugins (aL, e asm.arch=" "??" ")",
+	"Lc", "", "list core plugins",
+	"Ld", "", "list debug plugins (same as dL)",
+	"Lh", "", "list hash plugins (same as ph)",
+	"Li", "", "list bin plugins (same as iL)",
+	"Lo", "", "list io plugins (same as oL)",
 	NULL
 };
 
 static const char *help_msg_T[] = {
 	"Usage:", "T", "[-][ num|msg]",
-	"T", "", "List all Text log messages",
-	"T", " message", "Add new log message",
-	"T", " 123", "List log from 123",
-	"T", " 10 3", "List 3 log messages starting from 10",
-	"T*", "", "List in radare commands",
-	"T-", "", "Delete all logs",
-	"T-", " 123", "Delete logs before 123",
-	"Tl", "", "Get last log message id",
-	"Tj", "", "List in json format",
-	"Tm", " [idx]", "Display log messages without index",
-	"Ts", "", "List files in current directory (see pwd, cd)",
-	"TT", "", "Enter into the text log chat console",
+	"T", "", "list all Text log messages",
+	"T", " message", "add new log message",
+	"T", " 123", "list log from 123",
+	"T", " 10 3", "list 3 log messages starting from 10",
+	"T*", "", "list in radare commands",
+	"T-", "", "delete all logs",
+	"T-", " 123", "delete logs before 123",
+	"Tl", "", "get last log message id",
+	"Tj", "", "list in json format",
+	"Tm", " [idx]", "display log messages without index",
+	"Ts", "", "list files in current directory (see pwd, cd)",
+	"TT", "", "enter into the text log chat console",
 	NULL
 };
 
@@ -37,12 +44,57 @@ static void cmd_log_init(RCore *core) {
 	DEFINE_CMD_DESCRIPTOR (core, T);
 }
 
+static void screenlock(RCore *core) {
+	//  char *pass = r_cons_input ("Enter new password: ");
+	char *pass = r_cons_password (Color_INVERT "Enter new password:"Color_INVERT_RESET);
+	if (!pass || !*pass) {
+		return;
+	}
+	char *again = r_cons_password (Color_INVERT "Type it again:"Color_INVERT_RESET);
+	if (!again || !*again) {
+		return;
+	}
+	if (strcmp (pass, again)) {
+		eprintf ("Password mismatch!\n");
+		return;
+	}
+	bool running = true;
+	r_cons_clear_buffer ();
+	ut64 begin = r_sys_now ();
+	ut64 last = UT64_MAX;
+	ut64 tries = 0;
+	do {
+		r_cons_clear00 ();
+		r_cons_printf ("Retries: %d\n", tries);
+		r_cons_printf ("Locked ts: %s\n", r_time_to_string (begin));
+		if (last != UT64_MAX) {
+			r_cons_printf ("Last try: %s\n", r_time_to_string (last));
+		}
+		r_cons_newline ();
+		r_cons_flush ();
+		char *msg = r_cons_password ("radare2 password: ");
+		if (msg && !strcmp (msg, pass)) {
+			running = false;
+		} else {
+			eprintf ("\nInvalid password.\n");
+			last = r_sys_now ();
+			tries++;
+		}
+		free (msg);
+		int n = r_num_rand (10) + 1;
+		r_sys_usleep (n * 100000);
+	} while (running);
+	r_cons_set_cup (true);
+	free (pass);
+	eprintf ("Unlocked!\n");
+}
+
 static int textlog_chat(RCore *core) {
 	char prompt[64];
 	char buf[1024];
 	int lastmsg = 0;
 	const char *me = r_config_get (core->config, "cfg.user");
-	char msg[1024];
+	char msg[2048];
 
 	eprintf ("Type '/help' for commands:\n");
 	snprintf (prompt, sizeof (prompt) - 1, "[%s]> ", me);
@@ -81,7 +133,7 @@ static int textlog_chat(RCore *core) {
 		} else if (*buf == '/') {
 			eprintf ("Unknown command: %s\n", buf);
 		} else {
-			snprintf (msg, sizeof (msg) - 1, "[%s] %s", me, buf);
+			snprintf (msg, sizeof (msg), "[%s] %s", me, buf);
 			r_core_log_add (core, msg);
 		}
 	}
@@ -162,16 +214,60 @@ static int cmd_plugins(void *data, const char *input) {
 	RCore *core = (RCore *) data;
 	switch (input[0]) {
 	case 0:
-		r_lib_list (core->lib);
+		r_core_cmd_help (core, help_msg_L);
+		// return r_core_cmd0 (core, "Lc");
 		break;
 	case '-':
-		r_lib_close (core->lib, input + 2);
+		r_lib_close (core->lib, r_str_trim_ro (input + 1));
 		break;
 	case ' ':
-		r_lib_open (core->lib, input + 2);
+		r_lib_open (core->lib, r_str_trim_ro (input + 1));
 		break;
 	case '?':
 		r_core_cmd_help (core, help_msg_L);
+		break;
+	case 'd': // "Ld"
+		r_core_cmd0 (core, "dL"); // rahash2 -L is more verbose
+		break;
+	case 'h': // "Lh"
+		r_core_cmd0 (core, "ph"); // rahash2 -L is more verbose
+		break;
+	case 'a': // "La"
+		r_core_cmd0 (core, "e asm.arch=??");
+		break;
+	case 'L': // "LL"
+		screenlock (core);
+		break;
+	case 'o': // "Lo"
+	case 'i': // "Li"
+		r_core_cmdf (core, "%cL", input[0]);
+		break;
+	case 'c': { // "Lc"
+		RListIter *iter;
+		RCorePlugin *cp;
+		switch (input[1]) {
+		case 'j': {
+			r_cons_printf ("[");
+			bool is_first_element = true;
+			r_list_foreach (core->rcmd->plist, iter, cp) {
+				r_cons_printf ("%s{\"Name\":\"%s\",\"Description\":\"%s\"}",
+					is_first_element? "" : ",", cp->name, cp->desc);
+				is_first_element = false;
+			}
+			r_cons_printf ("]\n");
+			break;
+			}
+		case 0:
+			r_lib_list (core->lib);
+			r_list_foreach (core->rcmd->plist, iter, cp) {
+				r_cons_printf ("%s: %s\n", cp->name, cp->desc);
+			}
+			break;
+		default:
+			eprintf ("oops\n");
+			break;
+		}
+		}
 		break;
 	}
 	return 0;

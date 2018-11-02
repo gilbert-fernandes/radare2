@@ -38,11 +38,21 @@ static bool check_bytes(const ut8 *buf, ut64 bufsz) {
 		if (sb.vaddr < 0x100 || sb.psize > bufsz) { // NAND
 			return false;
 		}
-		if (sb.cert_va < sb.vaddr) return false;
-		if (sb.cert_sz >= 0xf0000) return false;
-		if (sb.sign_va < sb.vaddr) return false;
-		if (sb.sign_sz >= 0xf0000) return false;
-		if (sb.load_index < 1 || sb.load_index > 0x40) return false; // should be 0x19 ?
+		if (sb.cert_va < sb.vaddr) {
+			return false;
+		}
+		if (sb.cert_sz >= 0xf0000) {
+			return false;
+		}
+		if (sb.sign_va < sb.vaddr) {
+			return false;
+		}
+		if (sb.sign_sz >= 0xf0000) {
+			return false;
+		}
+		if (sb.load_index < 1 || sb.load_index > 0x40) {
+			return false; // should be 0x19 ?
+		}
 #if 0
 		eprintf ("V=%d\n", sb.version);
 		eprintf ("PA=0x%08x sz=0x%x\n", sb.paddr, sb.psize);
@@ -61,28 +71,28 @@ static bool check_bytes(const ut8 *buf, ut64 bufsz) {
 	return false;
 }
 
-static void * load_bytes(RBinFile *arch, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
-	return (void*)(size_t)check_bytes (buf, sz);
+static bool load_bytes(RBinFile *bf, void **bin_obj, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
+	return check_bytes (buf, sz);
 }
 
-static bool load(RBinFile *arch) {
-	if (arch && arch->buf) {
-		const ut8 *bytes = r_buf_buffer (arch->buf);
-		ut64 sz = r_buf_size (arch->buf);
-		return load_bytes (arch, bytes, sz, arch->o->loadaddr, arch->sdb) != NULL;
+static bool load(RBinFile *bf) {
+	if (bf && bf->buf) {
+		const ut8 *bytes = r_buf_buffer (bf->buf);
+		ut64 sz = r_buf_size (bf->buf);
+		return load_bytes (bf, &bf->o->bin_obj, bytes, sz, bf->o->loadaddr, bf->sdb);
 	}
 	return false;
 }
 
-static int destroy (RBinFile *arch) {
+static int destroy (RBinFile *bf) {
 	return true;
 }
 
-static ut64 baddr(RBinFile *arch) {
+static ut64 baddr(RBinFile *bf) {
 	return sb.vaddr; // XXX
 }
 
-static RList* entries(RBinFile *arch) {
+static RList* entries(RBinFile *bf) {
 	RList* ret;
 	RBinAddr *ptr = NULL;
 
@@ -98,7 +108,7 @@ static RList* entries(RBinFile *arch) {
 	return ret;
 }
 
-static RList* sections(RBinFile *arch) {
+static RList* sections(RBinFile *bf) {
 	RBinSection *ptr = NULL;
 	RList *ret = NULL;
 	int rc;
@@ -107,7 +117,7 @@ static RList* sections(RBinFile *arch) {
 		return NULL;
 	}
 	ret->free = free;
-	rc = r_buf_fread_at (arch->buf, 0, (ut8*)&sb, "10i", 1);
+	rc = r_buf_fread_at (bf->buf, 0, (ut8*)&sb, "10i", 1);
 	if (!rc) {
 		r_list_free (ret);
 		return false;
@@ -122,7 +132,7 @@ static RList* sections(RBinFile *arch) {
 	ptr->vsize = sb.psize;
 	ptr->paddr = sb.paddr + 40;
 	ptr->vaddr = sb.vaddr;
-	ptr->srwx = R_BIN_SCN_READABLE | R_BIN_SCN_EXECUTABLE | R_BIN_SCN_MAP; // r-x
+	ptr->perm = R_PERM_RX; // r-x
 	ptr->add = true;
 	ptr->has_strings = true;
 	r_list_append (ret, ptr);
@@ -135,7 +145,7 @@ static RList* sections(RBinFile *arch) {
 	ptr->vsize = sb.sign_sz;
 	ptr->paddr = sb.sign_va - sb.vaddr;
 	ptr->vaddr = sb.sign_va;
-	ptr->srwx = R_BIN_SCN_READABLE | R_BIN_SCN_MAP; // r--
+	ptr->perm = R_PERM_R; // r--
 	ptr->has_strings = true;
 	ptr->add = true;
 	r_list_append (ret, ptr);
@@ -149,7 +159,7 @@ static RList* sections(RBinFile *arch) {
 		ptr->vsize = sb.cert_sz;
 		ptr->paddr = sb.cert_va - sb.vaddr;
 		ptr->vaddr = sb.cert_va;
-		ptr->srwx = R_BIN_SCN_READABLE | R_BIN_SCN_MAP; // r--
+		ptr->perm = R_PERM_R; // r--
 		ptr->has_strings = true;
 		ptr->add = true;
 		r_list_append (ret, ptr);
@@ -157,13 +167,13 @@ static RList* sections(RBinFile *arch) {
 	return ret;
 }
 
-static RBinInfo* info(RBinFile *arch) {
+static RBinInfo* info(RBinFile *bf) {
 	RBinInfo *ret = NULL;
 	const int bits = 16;
 	if (!(ret = R_NEW0 (RBinInfo))) {
 		return NULL;
 	}
-	ret->file = strdup (arch->file);
+	ret->file = strdup (bf->file);
 	ret->bclass = strdup ("bootloader");
 	ret->rclass = strdup ("mbn");
 	ret->os = strdup ("MBN");
@@ -181,7 +191,7 @@ static RBinInfo* info(RBinFile *arch) {
 	return ret;
 }
 
-static ut64 size(RBinFile *arch) {
+static ut64 size(RBinFile *bf) {
 	return sizeof (SBLHDR) + sb.psize;
 }
 
@@ -202,7 +212,7 @@ RBinPlugin r_bin_plugin_mbn = {
 };
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_BIN,
 	.data = &r_bin_plugin_mbn,
 	.version = R2_VERSION

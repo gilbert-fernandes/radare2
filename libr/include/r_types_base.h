@@ -14,6 +14,26 @@
 #define st8 signed char
 #define boolt int
 
+#if defined(_MSC_VER)
+# define R_ALIGNED(x) __declspec(align(x))
+#else
+# define R_ALIGNED(x) __attribute__((aligned(x)))
+#endif
+
+typedef R_ALIGNED(1) ut16 uut16;
+typedef R_ALIGNED(1) ut32 uut32;
+typedef R_ALIGNED(1) ut64 uut64;
+typedef R_ALIGNED(1) st16 ust16;
+typedef R_ALIGNED(1) st32 ust32;
+typedef R_ALIGNED(1) st64 ust64;
+
+typedef union {
+	ut8 v8;
+	ut16 v16;
+	ut32 v32;
+	ut64 v64;
+} utAny;
+
 typedef struct _ut80 {
 	ut64 Low;
 	ut16 High;
@@ -39,13 +59,9 @@ typedef struct _utX{
 
 #include <stdbool.h>
 
-#define R_ERROR -2
 #define R_FAIL -1
-#define R_FALSE 0
-#define R_TRUE 1
-#define R_TRUFAE 2
-#define R_NOTNULL (void*)(size_t)1
 #define R_EMPTY { 0 }
+#define R_EMPTY2 {{ 0 }}
 
 /* limits */
 #undef UT64_MAX
@@ -118,6 +134,8 @@ typedef struct _utX{
 #define B0100 4
 #define B0011 3
 #define B0010 2
+#define B0001 1
+#define B0000 0
 #undef B
 #define B4(a,b,c,d) ((a<<12)|(b<<8)|(c<<4)|(d))
 
@@ -136,6 +154,13 @@ typedef struct _utX{
 #undef NAN
 #elif defined(__GNUC__) || defined(__TINYC__)
 #define R_PACKED( __Declaration__ ) __Declaration__ __attribute__((__packed__))
+#endif
+
+#if APPLE_SDK_IPHONESIMULATOR
+#undef LIBC_HAVE_FORK
+#define LIBC_HAVE_FORK 0
+#undef DEBUGGER
+#define DEBUGGER 0
 #endif
 
 #endif // R2_TYPES_BASE_H

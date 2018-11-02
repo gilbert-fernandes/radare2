@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - pancake */
+/* radare - LGPL - Copyright 2009-2018 - pancake */
 
 #include <r_core.h> // just to get the RPrint instance
 #include <r_debug.h>
@@ -50,8 +50,10 @@ R_API int r_debug_reg_sync(RDebug *dbg, int type, int write) {
 					eprintf ("r_debug_reg: error writing "
 						"registers %d to %d\n", i, dbg->tid);
 				}
+				free (buf);
 				return false;
 			}
+			free (buf);
 		} else {
 			// int bufsize = R_MAX (1024, dbg->reg->size*2); // i know. its hacky
 			int bufsize = dbg->reg->size;
@@ -96,7 +98,7 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 	if (dbg->corebind.core) {
 		pr = ((RCore*)dbg->corebind.core)->print;
 	}
-	if (!(dbg->reg->bits & size)) {
+	if (size != 0 && !(dbg->reg->bits & size)) {
 		// TODO: verify if 32bit exists, otherwise use 64 or 8?
 		size = 32;
 	}
@@ -144,6 +146,28 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 					continue;
 				}
 			}
+			// Is this register being asked?
+			if (dbg->q_regs) {
+				if (!r_list_empty (dbg->q_regs)) {
+					RListIter *iterreg;
+					RList *q_reg = dbg->q_regs;
+					char *q_name;
+					bool found = false;
+					r_list_foreach (q_reg, iterreg, q_name) {
+						if (!strcmp (item->name, q_name)) {
+							found = true;
+							break;
+						}
+					}
+					if (!found) {
+					        continue;
+					}
+					r_list_delete (q_reg, iterreg);
+				} else {
+					// List is empty, all requested regs were taken, no need to go further
+					goto beach;
+				}
+			}
 			int regSize = item->size;
 			if (regSize < 80) {
 				value = r_reg_get_value (dbg->reg, item);
@@ -151,8 +175,8 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 				diff = r_reg_get_value (dbg->reg, item);
 				r_reg_arena_swap (dbg->reg, false);
 				delta = value-diff;
-				if (rad == 'j') {
-					snprintf (strvalue, sizeof (strvalue),"%"PFMT64d, value);
+				if (tolower (rad) == 'j') {
+					snprintf (strvalue, sizeof (strvalue),"%"PFMT64u, value);
 				} else {
 					snprintf (strvalue, sizeof (strvalue),"0x%08"PFMT64x, value);
 				}
@@ -176,6 +200,7 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 			itmidx++;
 
 			switch (rad) {
+			case 'J':
 			case 'j':
 				dbg->cb_printf ("%s\"%s\":%s",
 					n?",":"", item->name, strvalue);
@@ -217,7 +242,9 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 						snprintf (content, sizeof (content),
 							fmt2, "", item->name, "", strvalue, "");
 						len = colwidth - strlen (content);
-						if (len < 0) len = 0;
+						if (len < 0) {
+							len = 0;
+						}
 						memset (whites, ' ', sizeof (whites));
 						whites[len] = 0;
 						dbg->cb_printf (fmt2, a, item->name, b, strvalue,
@@ -251,8 +278,11 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 			n++;
 		}
 	}
+beach:
 	if (rad == 'j') {
 		dbg->cb_printf ("}\n");
+	} else if (rad == 'J') {
+		// do nothing
 	} else if (n > 0 && rad == 2 && ((n%cols))) {
 		dbg->cb_printf ("\n");
 	}
@@ -286,9 +316,13 @@ R_API ut64 r_debug_reg_get_err(RDebug *dbg, const char *name, int *err, utX *val
 	ut64 ret = 0LL;
 	int role = r_reg_get_name_idx (name);
 	const char *pname = name;
-	if (err) *err = 0;
+	if (err) {
+		*err = 0;
+	}
 	if (!dbg || !dbg->reg) {
-		if (err) *err = 1;
+		if (err) {
+			*err = 1;
+		}
 		return UT64_MAX;
 	}
 	if (role != -1) {

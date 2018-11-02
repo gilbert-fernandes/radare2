@@ -1,9 +1,10 @@
-/* radare2 - LGPL - Copyright 2014-2015 - pancake */
+/* radare2 - LGPL - Copyright 2014-2018 - pancake */
 
 #include <r_asm.h>
 #include <r_lib.h>
 #include <capstone/capstone.h>
 #include "../arch/ppc/libvle/vle.h"
+#include "../arch/ppc/libps/libps.h"
 
 static csh handle = 0;
 
@@ -23,13 +24,32 @@ static int decompile_vle(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	}
 	if (!vle_init (&handle, buf, len) && (instr = vle_next (&handle))) {
 		op->size = instr->size;
-		vle_snprint (op->buf_asm, R_ASM_BUFSIZE, a->pc, instr);
+		char buf_asm[64];
+		vle_snprint (buf_asm, sizeof (buf_asm), a->pc, instr);
+		r_asm_op_set_asm (op, buf_asm);
 		vle_free (instr);
 	} else {
-		strcpy (op->buf_asm, "invalid");
+		r_asm_op_set_asm (op, "invalid");
 		op->size = 2;
 		return -1;
 	}
+	return op->size;
+}
+
+static int decompile_ps(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
+	ppcps_t instr = {0};
+	if (len < 4) {
+		return -1;
+	}
+	op->size = 4;
+	const ut32 data = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+	if (libps_decode (data, &instr) < 1) {
+		r_asm_op_set_asm (op, "invalid");
+		return -1;
+	}
+	char buf_asm[64];
+	libps_snprint (buf_asm, sizeof (buf_asm), a->pc, &instr);
+	r_asm_op_set_asm (op, buf_asm);
 	return op->size;
 }
 
@@ -50,6 +70,15 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 		if (ret >= 0) {
 			return op->size;
 		}
+	} else if (a->cpu && strncmp (a->cpu, "ps", 2) == 0) {
+		// libps is big-endian only
+		if (!a->big_endian) {
+			return -1;
+		}
+		ret = decompile_ps (a, op, buf, len);
+		if (ret >= 0) {
+			return op->size;
+		}
 	}
 	if (mode != omode || a->bits != obits) {
 		cs_close (&handle);
@@ -64,15 +93,12 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 		}
 	}
 	op->size = 4;
-	op->buf_asm[0] = 0;
 	cs_option (handle, CS_OPT_DETAIL, CS_OPT_OFF);
-
 	n = cs_disasm (handle, (const ut8*) buf, len, off, 1, &insn);
 	op->size = 4;
 	if (n > 0 && insn->size > 0) {
-		snprintf (op->buf_asm, R_ASM_BUFSIZE, "%s%s%s",
-				insn->mnemonic, insn->op_str[0] ? " " : "",
-				insn->op_str);
+		const char *opstr = sdb_fmt ("%s%s%s", insn->mnemonic, insn->op_str[0] ? " " : "", insn->op_str);
+		r_asm_op_set_asm (op, opstr);
 		cs_free (insn, n);
 		return op->size;
 	}
@@ -85,8 +111,9 @@ RAsmPlugin r_asm_plugin_ppc_cs = {
 	.name = "ppc",
 	.desc = "Capstone PowerPC disassembler",
 	.license = "BSD",
+	.author = "pancake",
 	.arch = "ppc",
-	.cpus = "ppc,vle",
+	.cpus = "ppc,vle,ps",
 	.bits = 32 | 64,
 	.endian = R_SYS_ENDIAN_LITTLE | R_SYS_ENDIAN_BIG,
 	.fini = the_end,
@@ -94,7 +121,7 @@ RAsmPlugin r_asm_plugin_ppc_cs = {
 };
 
 #ifndef CORELIB
-RLibStruct radare_plugin = {
+R_API RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
 	.data = &r_asm_plugin_ppc_cs,
 	.version = R2_VERSION
