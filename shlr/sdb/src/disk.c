@@ -1,18 +1,16 @@
-/* sdb - MIT - Copyright 2013-2016 - pancake */
+/* sdb - MIT - Copyright 2013-2018 - pancake */
 
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include "sdb.h"
 
 #if __SDB_WINDOWS__
 
 #if UNICODE
-
 
 static wchar_t *r_utf8_to_utf16_l (const char *cstring, int len) {
 	if (!cstring || !len || len < -1) {
@@ -43,7 +41,7 @@ static bool r_sys_mkdir(const char *path) {
 	return ret;
 }
 #else
-#define r_sys_conv_utf8_to_utf16(buf) strdup (buf) 
+#define r_sys_conv_utf8_to_utf16(buf) strdup (buf)
 #define r_sys_mkdir(x) CreateDirectory (x, NULL)
 #endif
 #ifndef ERROR_ALREADY_EXISTS

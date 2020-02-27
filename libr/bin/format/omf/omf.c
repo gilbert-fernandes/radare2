@@ -1,6 +1,6 @@
 #include "omf.h"
 
-static int is_valid_omf_type(ut8 type) {
+static bool is_valid_omf_type(ut8 type) {
 	int ct = 0;
 	ut8 types[] = {
 		OMF_THEADR, OMF_LHEADR, OMF_COMENT, OMF_MODEND, OMF_MODEND32,
@@ -22,7 +22,7 @@ static int is_valid_omf_type(ut8 type) {
 	return false;
 }
 
-int r_bin_checksum_omf_ok(const ut8 *buf, ut64 buf_size) {
+bool r_bin_checksum_omf_ok(const ut8 *buf, ut64 buf_size) {
 	ut16 size;
 	ut8 checksum = 0;
 
@@ -36,7 +36,7 @@ int r_bin_checksum_omf_ok(const ut8 *buf, ut64 buf_size) {
 		return false;
 	}
 	//Some compiler set checksum to 0
-	if (!buf[2 + size]) {
+	if (!buf[size + 2]) {
 		return true;
 	}
 	size += 3;
@@ -751,9 +751,9 @@ int r_bin_omf_send_sections(RList *list, OMF_segment *section, r_bin_omf_obj *ob
 
 		// if index == 0, it's mean there is no name
 		if (section->name_idx && section->name_idx - 1 < obj->nb_name) {
-			snprintf (new->name, R_BIN_SIZEOF_STRINGS, "%s_%d", obj->names[section->name_idx - 1], ct_name++);
+			new->name = r_str_newf ("%s_%d", obj->names[section->name_idx - 1], ct_name++);
 		} else {
-			snprintf (new->name, R_BIN_SIZEOF_STRINGS, "no_name_%d", ct_name++);
+			new->name = r_str_newf ("no_name_%d", ct_name++);
 		}
 
 		new->size = data->size;

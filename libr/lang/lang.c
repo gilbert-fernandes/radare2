@@ -10,6 +10,7 @@ R_LIB_VERSION(r_lang);
 #include "p/rust.c"  // hardcoded
 #include "p/zig.c"   // hardcoded
 #include "p/c.c"     // hardcoded
+#include "p/v.c"     // hardcoded
 #include "p/lib.c"
 #if __UNIX__
 #include "p/cpipe.c" // hardcoded
@@ -51,21 +52,20 @@ R_API RLang *r_lang_new() {
 	r_lang_add (lang, &r_lang_plugin_zig);
 	r_lang_add (lang, &r_lang_plugin_pipe);
 	r_lang_add (lang, &r_lang_plugin_lib);
+	r_lang_add (lang, &r_lang_plugin_v);
 
 	return lang;
 }
 
-R_API void *r_lang_free(RLang *lang) {
-	if (!lang) {
-		return NULL;
+R_API void r_lang_free(RLang *lang) {
+	if (lang) {
+		__lang = NULL;
+		r_lang_undef (lang, NULL);
+		r_list_free (lang->langs);
+		r_list_free (lang->defs);
+		// TODO: remove langs plugins
+		free (lang);
 	}
-	__lang = NULL;
-	r_lang_undef (lang, NULL);
-	r_list_free (lang->langs);
-	r_list_free (lang->defs);
-	// TODO: remove langs plugins
-	free (lang);
-	return NULL;
 }
 
 // XXX: This is only used actually to pass 'core' structure
@@ -216,6 +216,10 @@ R_API int r_lang_run_file(RLang *lang, const char *file) {
 		if (!lang->cur->run_file) {
 			if (lang->cur->run) {
 				char *code = r_file_slurp (file, &len);
+				if (!code) {
+					eprintf ("Could not open '%s'.\n", file);
+					return 0;
+				}
 				ret = lang->cur->run (lang, code, len);
 				free (code);
 			}
